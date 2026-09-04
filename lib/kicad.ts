@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { sniffModelExtension } from "./file-format.ts";
 
 export type AssetKind =
   | "symbol"
@@ -15,6 +16,8 @@ export type IntakeAsset = {
   bytes: Uint8Array;
   kind: AssetKind;
   warnings: string[];
+  footprintSuffix?: string;
+  modelAssetId?: string;
 };
 
 export type PartMetadata = {
@@ -27,6 +30,7 @@ export type PartMetadata = {
   description: string;
   verified: "Unverified" | "Datasheet checked" | "Fabricated" | "Electrically tested";
   sourceUrl: string;
+  primaryFootprintId?: string;
 };
 
 export type NormalizedAsset = {
@@ -86,11 +90,11 @@ export function classifyAsset(name: string, bytes?: Uint8Array): AssetKind {
   if (ext === ".pdf") return "datasheet";
   if ([".lib", ".dcm"].includes(ext)) return "legacy-symbol";
 
-  if (bytes && bytes.length < 4 * 1024 * 1024) {
+  if (bytes) {
     const head = textDecoder.decode(bytes.slice(0, 4096)).trimStart();
     if (head.startsWith("(kicad_symbol_lib")) return "symbol";
     if (head.startsWith("(footprint") || head.startsWith("(module")) return "footprint";
-    if (head.includes("ISO-10303-21")) return "model";
+    if (sniffModelExtension(bytes)) return "model";
   }
   return "unsupported";
 }
@@ -109,6 +113,10 @@ function assetWarnings(name: string, kind: AssetKind): string[] {
 
 function makeAsset(name: string, sourceName: string, bytes: Uint8Array): IntakeAsset {
   const kind = classifyAsset(name, bytes);
+  if (kind === "model" && ![".step", ".stp", ".iges", ".igs", ".wrl"].includes(extension(name))) {
+    const ext = sniffModelExtension(bytes);
+    if (ext) name += "." + ext;
+  }
   return {
     id: randomId(),
     name: basename(name),
@@ -500,6 +508,10 @@ export function mergeKicadSymbolLibraries(existing: string | null, incoming: str
   return `${markIntakeGenerator(merged).trimEnd()}\n`;
 }
 
+export function footprintSuffix(asset: IntakeAsset) {
+  return asset.footprintSuffix?.trim() || firstFootprintName(textDecoder.decode(asset.bytes)) || basename(asset.name).replace(/\.kicad_mod$/i, "");
+}
+
 export async function normalizeAssets(
   assets: IntakeAsset[],
   metadata: PartMetadata,
@@ -521,10 +533,15 @@ export async function normalizeAssets(
     throw new Error("A package / footprint suffix is required when a footprint or 3D model is included.");
   }
   const packageStem = sanitizeKiCadName(metadata.packageName, "Package");
+  const usedFootprintNames = new Set<string>();
   const footprintNames = footprints.map((asset, index) => {
-    if (footprints.length === 1) return `${partName}_${packageStem}`;
-    const original = firstFootprintName(textDecoder.decode(asset.bytes)) || `Footprint_${index + 1}`;
-    return `${partName}_${sanitizeKiCadName(original)}`;
+    const suffix = asset.footprintSuffix?.trim() || (footprints.length === 1 ? packageStem : footprintSuffix(asset));
+    const base = `${partName}_${sanitizeKiCadName(suffix, `Footprint_${index + 1}`)}`;
+    let name = base;
+    let number = 2;
+    while (usedFootprintNames.has(name.toLowerCase())) name = `${base}_${number++}`;
+    usedFootprintNames.add(name.toLowerCase());
+    return name;
   });
   const modelNames = models.map((asset, index) => {
     const ext = extension(asset.name) || ".step";
@@ -537,9 +554,11 @@ export async function normalizeAssets(
           )}`;
     return `${stem}${ext}`;
   });
-  const primaryFootprint = footprintNames[0] ? `${category}:${footprintNames[0]}` : "";
+  const primaryIndex = Math.max(0, footprints.findIndex((asset) => asset.id === metadata.primaryFootprintId));
+  const primaryFootprint = footprintNames[primaryIndex] ? `${category}:${footprintNames[primaryIndex]}` : "";
   const normalized: NormalizedAsset[] = [];
   const warnings = assets.flatMap((asset) => asset.warnings);
+  if (footprints.length > 1) warnings.push(`All ${footprints.length} footprints will be saved. The symbol defaults to ${primaryFootprint}; choose an alternate footprint in KiCad when needed.`);
 
   for (const [index, asset] of symbols.entries()) {
     const rewritten = rewriteSymbolLibrary(
@@ -563,7 +582,10 @@ export async function normalizeAssets(
   }
 
   for (const [index, asset] of footprints.entries()) {
-    const modelReference = modelNames[index] ?? modelNames[0];
+    const modelIndex = asset.modelAssetId === "none" ? -1 : asset.modelAssetId
+      ? models.findIndex((model) => model.id === asset.modelAssetId)
+      : models.length === 1 ? 0 : -1;
+    const modelReference = modelNames[modelIndex];
     const repositoryModelPath = modelReference
       ? `\${MY_KICAD_LIB}/3dmodels/${category}.3dshapes/${modelReference}`
       : undefined;
@@ -645,6 +667,7 @@ export async function normalizeAssets(
       category,
       symbol: symbols.length ? `${category}:${partName}` : null,
       footprints: footprintNames.map((name) => `${category}:${name}`),
+      default_footprint: primaryFootprint || null,
       verified: metadata.verified,
     },
     provenance: {

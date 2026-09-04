@@ -59,6 +59,7 @@ import {
 import {
   acceptedFileTypes,
   formatBytes,
+  footprintSuffix,
   inferMetadataFromAssets,
   ingestBrowserFiles,
   normalizeAssets,
@@ -205,6 +206,12 @@ export default function Home() {
 
   function removeAsset(id: string) {
     setAssets((current) => current.filter((asset) => asset.id !== id));
+    setNormalized(null);
+    setCommitResult(null);
+  }
+
+  function updateFootprint(id: string, patch: Partial<IntakeAsset>) {
+    setAssets((current) => current.map((asset) => asset.id === id ? { ...asset, ...patch } : asset));
     setNormalized(null);
     setCommitResult(null);
   }
@@ -593,6 +600,36 @@ export default function Home() {
                 )}
 
                 <AssetPreviewGallery assets={assets} />
+                {assets.some((asset) => asset.kind === "footprint") && (
+                  <div className="mt-5 space-y-4 rounded-xl border border-slate-800 p-4">
+                    <h3 className="text-sm font-medium text-slate-200">Footprint variants</h3>
+                    <p className="text-sm text-slate-500">Add as many footprints as needed. Each gets its own file; choose which one the symbol uses by default.</p>
+                    <FieldLabel htmlFor="default-footprint">Default symbol footprint</FieldLabel>
+                    <Select value={metadata.primaryFootprintId && assets.some((a) => a.id === metadata.primaryFootprintId) ? metadata.primaryFootprintId : assets.find((a) => a.kind === "footprint")?.id}
+                      onValueChange={(value) => updateMetadata("primaryFootprintId", value ?? "")}>
+                      <SelectTrigger id="default-footprint" className="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>{assets.filter((a) => a.kind === "footprint").map((a) => <SelectItem key={a.id} value={a.id}>{a.sourceName}</SelectItem>)}</SelectContent>
+                    </Select>
+                    {assets.filter((a) => a.kind === "footprint").map((asset) => (
+                      <div key={asset.id} className="space-y-2 border-t border-slate-800 pt-3">
+                        <p className="break-all text-sm text-slate-400">{asset.sourceName}</p>
+                        <FieldLabel htmlFor={`suffix-${asset.id}`}>Footprint name suffix</FieldLabel>
+                        <Input id={`suffix-${asset.id}`} value={asset.footprintSuffix ?? ""}
+                          placeholder={assets.filter((a) => a.kind === "footprint").length === 1 ? metadata.packageName || footprintSuffix(asset) : footprintSuffix(asset)}
+                          onChange={(event) => updateFootprint(asset.id, { footprintSuffix: event.target.value })} />
+                        <FieldLabel htmlFor={`model-${asset.id}`}>3D model for this footprint</FieldLabel>
+                        <Select value={asset.modelAssetId ?? "auto"} onValueChange={(value) => updateFootprint(asset.id, { modelAssetId: value === "auto" ? undefined : value ?? "none" })}>
+                          <SelectTrigger id={`model-${asset.id}`} className="w-full"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">Automatic (only when one model is included)</SelectItem>
+                            <SelectItem value="none">No imported model</SelectItem>
+                            {assets.filter((a) => a.kind === "model").map((a) => <SelectItem key={a.id} value={a.id}>{a.sourceName}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
 

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { zipSync } from "fflate";
 
 import {
   acceptedFileTypes,
   classifyAsset,
+  ingestBrowserFiles,
   mergeKicadSymbolLibraries,
   normalizeAssets,
   type IntakeAsset,
@@ -98,6 +100,33 @@ const metadata: PartMetadata = {
 };
 
 const result = await normalizeAssets(assets, metadata);
+
+const variants = await normalizeAssets([
+  ...assets,
+  { ...assets[1], id: "second-footprint", sourceName: "alternate/OLD_FP.kicad_mod", modelAssetId: "none" },
+], { ...metadata, primaryFootprintId: "second-footprint" });
+assert.equal(variants.footprintNames.length, 2);
+assert.notEqual(variants.footprintNames[0], variants.footprintNames[1]);
+assert.match(decoder.decode(variants.files.find((file) => file.kind === "symbol")!.bytes), new RegExp('RF:' + variants.footprintNames[1]));
+assert.equal(variants.files.filter((file) => file.kind === "footprint").length, 2);
+const namedVariants = await normalizeAssets([
+  { ...assets[1], footprintSuffix: "HandSolder", modelAssetId: "model" },
+  { ...assets[1], id: "reflow", footprintSuffix: "Reflow", modelAssetId: "none" },
+  assets[2],
+], metadata);
+assert.deepEqual(namedVariants.footprintNames, ["ADL5606_HandSolder", "ADL5606_Reflow"]);
+assert.match(decoder.decode(namedVariants.files.find((file) => file.id === "footprint")!.bytes), /MY_KICAD_LIB/);
+assert.doesNotMatch(decoder.decode(namedVariants.files.find((file) => file.id === "reflow")!.bytes), /MY_KICAD_LIB/);
+assert.equal(classifyAsset("download", encoder.encode("IGES test".padEnd(72) + "S      1\n")), "model");
+const extracted = await ingestBrowserFiles([new File([zipSync({
+  "models/part.IGES": encoder.encode("IGES test".padEnd(72) + "S      1\n"),
+  "models/download": encoder.encode("IGES test".padEnd(72) + "S      1\n"),
+  "hand/part.kicad_mod": encoder.encode(sourceFootprint),
+  "reflow/part.kicad_mod": encoder.encode(sourceFootprint),
+})], "part.zip")]);
+assert.equal(extracted.filter((asset) => asset.kind === "model").length, 2);
+assert.equal(extracted.filter((asset) => asset.kind === "footprint").length, 2);
+assert.equal(extracted.find((asset) => asset.sourceName.endsWith("models/download"))?.name, "download.igs");
 assert.equal(result.symbolName, "ADL5606");
 assert.deepEqual(result.footprintNames, ["ADL5606_SOT-89-3"]);
 

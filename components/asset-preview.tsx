@@ -160,7 +160,7 @@ export function AssetPreviewGallery({ assets }: { assets: IntakeAsset[] }) {
               className={`flex shrink-0 items-center gap-2 rounded-md border px-3 py-2 text-sm transition ${active ? "border-teal-400/35 bg-teal-400/10 text-teal-200" : "border-transparent text-slate-500 hover:border-slate-700 hover:bg-slate-900 hover:text-slate-300"}`}
             >
               {iconFor(kind)}
-              {labels[kind]}
+              {labels[kind]} · {asset.name}
             </button>
           );
         })}
