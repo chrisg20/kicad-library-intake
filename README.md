@@ -4,7 +4,8 @@ A static, browser-based intake console for turning downloaded KiCad CAD assets i
 
 ## What it does
 
-- accepts modern KiCad symbol libraries (`.kicad_sym`), footprints (`.kicad_mod`), STEP/VRML models, PDF datasheets, and ZIP packages
+- accepts modern KiCad symbol libraries (`.kicad_sym`), footprints (`.kicad_mod`), STEP/IGES/VRML models, PDF datasheets, and ZIP packages
+- previews symbol and footprint geometry in 2D, PDF datasheets in-browser, and text-based 3D model geometry with orbit and zoom controls
 - imports direct CAD links and inspects component pages when the source permits browser cross-origin access
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)
 - rewrites symbol names, value/metadata fields, footprint names, and 3D model references

@@ -175,6 +175,61 @@ textarea {
   order: 3;
 }
 
+.preview-stage {
+  position: relative;
+  height: clamp(17rem, 42vw, 24rem);
+  min-height: 17rem;
+  overflow: hidden;
+  border: 1px solid rgba(51, 65, 85, 0.72);
+  border-radius: 0.7rem;
+  background:
+    linear-gradient(rgba(71, 85, 105, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(71, 85, 105, 0.08) 1px, transparent 1px),
+    radial-gradient(circle at 50% 45%, rgba(20, 184, 166, 0.08), transparent 58%),
+    #080d14;
+  background-size: 24px 24px, 24px 24px, auto, auto;
+}
+
+.preview-drawing,
+.preview-pin {
+  fill: none;
+  stroke: #8ee8dd;
+  stroke-width: 1.45px;
+  vector-effect: non-scaling-stroke;
+}
+
+.preview-pin {
+  stroke: #9ab0c4;
+}
+
+.preview-pad {
+  fill: rgba(246, 196, 83, 0.72);
+  stroke: #ffe7a3;
+  stroke-width: 1.15px;
+  vector-effect: non-scaling-stroke;
+}
+
+.preview-drill {
+  fill: #080d14;
+  stroke: rgba(226, 232, 240, 0.72);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+
+.preview-grid-label {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.65rem;
+  border: 1px solid rgba(51, 65, 85, 0.76);
+  border-radius: 0.38rem;
+  background: rgba(2, 6, 23, 0.76);
+  padding: 0.32rem 0.5rem;
+  color: #64748b;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  pointer-events: none;
+}
+
 @media (min-width: 640px) {
   .panel-heading {
     padding-inline: 1.5rem;

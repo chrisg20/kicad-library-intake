@@ -59,6 +59,8 @@ export const acceptedFileTypes = [
   ".kicad_mod",
   ".step",
   ".stp",
+  ".iges",
+  ".igs",
   ".wrl",
   ".pdf",
   ".zip",
@@ -80,7 +82,7 @@ export function classifyAsset(name: string, bytes?: Uint8Array): AssetKind {
   const ext = extension(name);
   if (ext === ".kicad_sym") return "symbol";
   if (ext === ".kicad_mod") return "footprint";
-  if ([".step", ".stp", ".wrl"].includes(ext)) return "model";
+  if ([".step", ".stp", ".iges", ".igs", ".wrl"].includes(ext)) return "model";
   if (ext === ".pdf") return "datasheet";
   if ([".lib", ".dcm"].includes(ext)) return "legacy-symbol";
 

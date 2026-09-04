@@ -125,7 +125,7 @@ function candidateKind(url: URL): LinkCandidate["kind"] {
   if (path.endsWith(".zip")) return "archive";
   if (path.endsWith(".kicad_sym") || path.endsWith(".lib")) return "symbol";
   if (path.endsWith(".kicad_mod")) return "footprint";
-  if (/\.(step|stp|wrl)$/.test(path)) return "model";
+  if (/\.(step|stp|iges|igs|wrl)$/.test(path)) return "model";
   if (path.endsWith(".pdf")) return "datasheet";
   return "download";
 }
@@ -163,7 +163,7 @@ function filenameWithKnownExtension(response: Response, url: URL, contentType: s
 }
 
 function looksLikeFile(url: URL, contentType: string) {
-  return /\.(zip|kicad_sym|kicad_mod|step|stp|wrl|pdf|lib|dcm)$/i.test(url.pathname) || (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml"));
+  return /\.(zip|kicad_sym|kicad_mod|step|stp|iges|igs|wrl|pdf|lib|dcm)$/i.test(url.pathname) || (!contentType.includes("text/html") && !contentType.includes("application/xhtml+xml"));
 }
 
 export async function inspectBrowserLink(input: string): Promise<LinkInspection | DirectLinkFile> {

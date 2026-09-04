@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 
 import {
+  acceptedFileTypes,
+  classifyAsset,
   mergeKicadSymbolLibraries,
   normalizeAssets,
   type IntakeAsset,
   type PartMetadata,
 } from "../lib/kicad.ts";
+import { parseModelPreview, parsePlanarPreview } from "../lib/kicad-preview.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -121,5 +124,24 @@ const merged = mergeKicadSymbolLibraries(existing, [rewrittenSymbol]);
 assert.match(merged, /\(symbol "EXISTING"/);
 assert.match(merged, /\(symbol "ADL5606"/);
 assert.equal((merged.match(/\(kicad_symbol_lib/g) ?? []).length, 1);
+
+assert.match(acceptedFileTypes, /\.iges/);
+assert.match(acceptedFileTypes, /\.igs/);
+assert.equal(classifyAsset("package.iges"), "model");
+assert.equal(classifyAsset("package.igs"), "model");
+assert.equal(classifyAsset("datasheet.pdf"), "datasheet");
+
+const symbolPreview = parsePlanarPreview(assets[0]);
+assert(symbolPreview.primitives.some((primitive) => primitive.type === "rect"));
+
+const footprintPreview = parsePlanarPreview(assets[1]);
+assert(footprintPreview.primitives.some((primitive) => primitive.type === "pad"));
+
+const stepPreview = parseModelPreview({
+  name: "sample.step",
+  bytes: encoder.encode("ISO-10303-21;\n#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=CARTESIAN_POINT('',(1.,2.,3.));\nEND-ISO-10303-21;"),
+});
+assert.equal(stepPreview.format, "STEP");
+assert.equal(stepPreview.points.length, 2);
 
 console.log("KiCad normalization checks passed");

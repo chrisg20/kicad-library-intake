@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { AssetPreviewGallery } from "@/components/asset-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -416,7 +417,7 @@ export default function Home() {
             <p className="mb-2 font-mono text-xs font-medium uppercase tracking-[0.18em] text-teal-300/80">Component intake</p>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-3xl">Turn downloaded CAD into a trusted library part.</h1>
             <p className="mt-2 max-w-2xl text-base leading-7 text-slate-400">
-              Add downloaded KiCad assets or a direct public link. Internal names, model references, repository paths, and traceability metadata are normalized together in your browser.
+              Add downloaded KiCad assets, a datasheet, or a direct public link. Names, model references, repository paths, and traceability metadata are normalized together in your browser.
             </p>
           </div>
           <div className="flex items-center gap-3 sm:gap-5">
@@ -543,7 +544,7 @@ export default function Home() {
                     <UploadCloud className="size-5" />
                   </span>
                   <span className="text-sm font-medium text-slate-200">Drop a package or choose files</span>
-                  <span className="mt-1 text-sm text-slate-500">KiCad symbols, footprints, STEP/VRML models, PDFs, or ZIP · 40 MB max</span>
+                  <span className="mt-1 text-sm text-slate-500">KiCad symbols, footprints, STEP/IGES/VRML models, PDF datasheets, or ZIP · 40 MB max</span>
                 </button>
                 <input
                   ref={fileInputRef}
@@ -590,6 +591,8 @@ export default function Home() {
                     ))}
                   </div>
                 )}
+
+                <AssetPreviewGallery assets={assets} />
               </div>
             </section>
 
@@ -763,7 +766,7 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <FieldLabel htmlFor="datasheet">Datasheet URL</FieldLabel>
+                  <FieldLabel htmlFor="datasheet">Datasheet URL <span className="font-normal text-slate-500">(optional when a PDF is attached)</span></FieldLabel>
                   <Input
                     id="datasheet"
                     value={metadata.datasheet}
