@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, afterEach } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
+import { zipSync } from "fflate";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const originalFetch = globalThis.fetch;
@@ -13,6 +14,7 @@ const vite = await createServer({
   server: { hmr: false, middlewareMode: true },
 });
 const { inspectBrowserLink, downloadBrowserFile } = await vite.ssrLoadModule("/lib/browser-link.ts");
+const { inspectLinkWithActions } = await vite.ssrLoadModule("/lib/github-actions-link.ts");
 
 afterEach(() => { globalThis.fetch = originalFetch; });
 after(async () => { await vite.close(); });
@@ -70,4 +72,44 @@ test("names extensionless IGES downloads from content, MIME, hints, or query fil
 test("rejects a login page returned by an IGES download URL", async () => {
   globalThis.fetch = async () => new Response("<html>Sign in</html>", {headers:{"content-type":"text/html"}});
   await assert.rejects(downloadBrowserFile({name:"IGES",url:"https://example.com/model.igs"}), /web page/);
+});
+
+test("uses a workflow artifact as the link-fetch backend response", async () => {
+  const originalTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback) => originalTimeout(callback, 0);
+  let requestId = "";
+  globalThis.fetch = async (url, init = {}) => {
+    const value = String(url);
+    if (value.endsWith("/actions/workflows/link-fetch.yml/dispatches")) {
+      const body = JSON.parse(init.body);
+      requestId = body.inputs.request_id;
+      assert.equal(body.inputs.source_url, "https://vendor.example/model");
+      return new Response(null, { status: 204 });
+    }
+    if (value.includes("/actions/artifacts?")) {
+      assert.match(value, new RegExp("link-fetch-" + requestId));
+      return Response.json({ artifacts: [{ expired: false, archive_download_url: "https://api.github.com/artifact.zip" }] });
+    }
+    if (value.endsWith("/artifact.zip")) {
+      return new Response(zipSync({
+        "response.json": new TextEncoder().encode(JSON.stringify({
+          kind: "file",
+          sourceUrl: "https://vendor.example/model",
+          filename: "part.igs",
+          contentType: "model/iges",
+          assetPath: "asset/part.igs",
+        })),
+        "asset/part.igs": new TextEncoder().encode("IGES"),
+      }));
+    }
+    throw new Error("Unexpected request: " + value);
+  };
+  try {
+    const result = await inspectLinkWithActions("token", "https://vendor.example/model", "IGES");
+    assert.equal(result.kind, "file");
+    assert.equal(result.filename, "part.igs");
+    assert.equal(new TextDecoder().decode(result.bytes), "IGES");
+  } finally {
+    globalThis.setTimeout = originalTimeout;
+  }
 });

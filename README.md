@@ -9,6 +9,7 @@ A static, browser-based intake console for turning downloaded KiCad CAD assets i
 
 3D CAD tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1) and OpenCascade, with Three.js rendering. The unmodified runtime, WASM and license are copied from the locked npm package during builds. CAD processing stays local in a cancellable worker; no model is uploaded for preview. Curve-only IGES files cannot produce solid surfaces.
 - imports direct CAD links and inspects component pages when the source permits browser cross-origin access
+- can dispatch link inspection and file downloads through a short-lived GitHub Actions backend when the repository is connected
 - discovers IGES/IGS links from extensions, encoded/query filenames, labels, and download attributes; detects extensionless IGES content
 - keeps multiple footprint variants with collision-safe names, a selectable symbol default, and explicit per-footprint model assignments
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)
@@ -17,6 +18,17 @@ A static, browser-based intake console for turning downloaded KiCad CAD assets i
 - merges symbols into the selected category library rather than replacing the whole `.kicad_sym` file
 - creates one atomic GitHub commit through the Git Data REST API
 - writes a SHA-256 provenance manifest for every imported component
+
+## GitHub token permissions
+
+Use a fine-grained personal access token limited to the target library repository and
+chrisg20/kicad-library-intake. It needs **Contents: read and write** on the target
+library and **Actions: read and write** on chrisg20/kicad-library-intake. The token
+stays in browser memory and is sent only to api.github.com.
+
+The link backend runs only on demand, accepts public HTTP(S) URLs, validates every
+redirect and DNS result against private/local address ranges, times out remote requests,
+limits pages to 2 MB and files to 40 MB, and deletes returned artifacts after one day.
 
 ## Target repository layout
 
@@ -62,7 +74,10 @@ metadata/RF/ADL5606.json
 
 ## GitHub access
 
-Use a fine-grained personal access token restricted to the target repository with `Contents: Read and write`. Repository and branch are remembered in local browser storage. The token is held only in React state and disappears when the tab closes.
+Use a fine-grained personal access token restricted to the selected repositories with
+`Contents: Read and write` for the library and `Actions: Read and write` for this
+intake repository. Repository and branch are remembered in local browser storage. The
+token is held only in React state and disappears when the tab closes.
 
 The current implementation commits to an existing branch after explicit user review. It intentionally does not force-update a branch.
 

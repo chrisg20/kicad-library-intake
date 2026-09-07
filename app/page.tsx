@@ -50,6 +50,7 @@ import {
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
 import { downloadBrowserFile, inspectBrowserLink, type LinkCandidate, type LinkInspection } from "@/lib/browser-link";
+import { inspectLinkWithActions } from "@/lib/github-actions-link";
 import {
   commitPackage,
   parseRepository,
@@ -219,7 +220,10 @@ export default function Home() {
   async function fetchCandidate(candidate: LinkCandidate | { name: string; url: string; kind: "download" }) {
     setLinkBusy(true);
     try {
-      const file = await downloadBrowserFile(candidate);
+      const file = repositoryInfo
+        ? await inspectLinkWithActions(token, candidate.url, candidate.filenameHint || candidate.name)
+        : await downloadBrowserFile(candidate);
+      if (file.kind !== "file") throw new Error("That download link returned another web page instead of a file.");
       await addBrowserFiles([new File([file.bytes], file.filename || candidate.name, { type: file.contentType })]);
       updateMetadata("sourceUrl", file.sourceUrl);
     } catch (error) {
@@ -234,7 +238,9 @@ export default function Home() {
     setLinkBusy(true);
     setInspection(null);
     try {
-      const payload = await inspectBrowserLink(sourceUrl.trim());
+      const payload = repositoryInfo
+        ? await inspectLinkWithActions(token, sourceUrl.trim())
+        : await inspectBrowserLink(sourceUrl.trim());
       updateMetadata("sourceUrl", payload.sourceUrl);
       if (payload.kind === "file") {
         await addBrowserFiles([new File([payload.bytes], payload.filename, { type: payload.contentType })]);
@@ -352,7 +358,7 @@ export default function Home() {
                   Connect the Git library
                 </DialogTitle>
                 <DialogDescription className="leading-6 text-slate-400">
-                  Use a fine-grained token with Contents read/write access to one repository. The token stays in memory and is cleared when this tab closes.
+                  Use a fine-grained token with Contents read/write on your library and Actions read/write on this intake repository. The token stays in memory and is cleared when this tab closes.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-5 py-2">
@@ -479,7 +485,9 @@ export default function Home() {
                   </Button>
                 </div>
                 <p className="mt-2 text-sm text-slate-500">
-                  Pages-only mode: links work when the source permits direct browser access. If one is blocked, download it and drop the file below.
+                  {repositoryInfo
+                    ? "GitHub Actions backend active. Link requests may take 10–60 seconds while a runner starts."
+                    : "Direct-browser mode. Connect GitHub below to use the reliable Actions backend for blocked links."}
                 </p>
 
                 {inspection && (
