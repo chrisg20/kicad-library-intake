@@ -9,7 +9,8 @@ A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC compo
 
 3D CAD tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1) and OpenCascade, with Three.js rendering. The unmodified runtime, WASM and license are copied from the locked npm package during builds. CAD processing stays local in a cancellable worker; no model is uploaded for preview. Curve-only IGES files cannot produce solid surfaces.
 - accepts an LCSC `C` ID and converts it into an importable KiCad bundle with [easyeda2kicad 1.0.1](https://github.com/uPesy/easyeda2kicad.py/tree/fff10a38619963d7cb1c57d779655a9ea4572e95) (AGPL-3.0), including symbol, footprint, STEP, and WRL files
-- fills manufacturer, MPN, description, package, and datasheet metadata from the converted LCSC component
+- fills manufacturer, MPN, package, and available metadata from the converted LCSC component
+- accepts an optional PDF datasheet on the LCSC path, archives it with the component, and can use OpenAI to suggest an editable functional title and technical description
 - autocompletes manually entered manufacturers from component manifests already stored in the connected library
 - keeps multiple footprint variants with collision-safe names, a selectable symbol default, and explicit per-footprint model assignments
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)
@@ -22,11 +23,16 @@ A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC compo
 ## GitHub token permissions
 
 Use a fine-grained personal access token limited to the target library repository and
-chrisg20/kicad-library-intake. It needs **Contents: read and write** on the target
-library and **Actions: read and write** on chrisg20/kicad-library-intake. The token
+chrisg20/kicad-library-intake. It needs **Contents: read and write** on both repositories
+and **Actions: read and write** on chrisg20/kicad-library-intake. The token
 stays in browser memory and is sent only to api.github.com.
 
 The LCSC converter runs only on demand and deletes returned artifacts after one day.
+AI datasheet descriptions also run on demand. Add an Actions repository secret named
+`OPENAI_API_KEY` to chrisg20/kicad-library-intake to enable them. The PDF is passed to
+OpenAI as a file input; generated text is always editable before it is committed.
+The converter retains a datasheet URL when EasyEDA provides one, but does not guess or
+scrape a PDF when the source metadata is missing.
 
 ## Target repository layout
 

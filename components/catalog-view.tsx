@@ -94,6 +94,7 @@ export function CatalogView(props: Props) {
     if (!query) return components;
     return components.filter(({ manifest }) => [
       manifest.component.library_name,
+      manifest.component.title,
       manifest.component.description,
       manifest.component.manufacturer,
       manifest.component.mpn,
@@ -201,7 +202,8 @@ export function CatalogView(props: Props) {
                         return (
                           <tr key={component.manifestPath} className="align-top bg-slate-950/15">
                             <td className="px-5 py-5">
-                              <div className="font-mono text-sm font-semibold text-teal-200">{manifest.component.library_name}</div>
+                              <div className="text-sm font-semibold text-teal-200">{manifest.component.title || manifest.component.library_name}</div>
+                              {manifest.component.title && <div className="mt-1 font-mono text-xs text-slate-500">{manifest.component.library_name}</div>}
                               <div className="mt-1 text-sm text-slate-400">{manifest.component.manufacturer || "Unknown manufacturer"}</div>
                               <div className="mt-1 font-mono text-xs text-slate-600">{manifest.component.mpn}</div>
                               {manifest.provenance.source_url && <a href={manifest.provenance.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-teal-300">Source <ExternalLink className="size-3" /></a>}

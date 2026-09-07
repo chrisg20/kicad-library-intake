@@ -24,6 +24,7 @@ export type CatalogManifest = {
     manufacturer: string;
     mpn: string;
     library_name: string;
+    title?: string;
     description: string;
     package: string;
     datasheet: string;

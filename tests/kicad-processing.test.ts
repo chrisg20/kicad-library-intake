@@ -91,6 +91,7 @@ const metadata: PartMetadata = {
   manufacturer: "Analog Devices",
   mpn: "ADL5606ARKZ-R7",
   libraryName: "ADL5606",
+  title: "RF gain block",
   packageName: "SOT-89-3",
   category: "RF",
   datasheet: "https://example.com/adl5606.pdf",

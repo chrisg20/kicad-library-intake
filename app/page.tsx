@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
+import { describeDatasheetWithActions } from "@/lib/datasheet-ai";
 import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
   commitPackage,
@@ -76,6 +77,7 @@ const defaultMetadata: PartMetadata = {
   manufacturer: "",
   mpn: "",
   libraryName: "",
+  title: "",
   packageName: "",
   category: "RF",
   datasheet: "",
@@ -130,12 +132,14 @@ function Step({ number, label, active }: { number: number; label: string; active
 
 export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lcscDatasheetInputRef = useRef<HTMLInputElement>(null);
   const [assets, setAssets] = useState<IntakeAsset[]>([]);
   const [metadata, setMetadata] = useState<PartMetadata>(defaultMetadata);
   const [sourceMode, setSourceMode] = useState<"upload" | "lcsc">("upload");
   const [lcscId, setLcscId] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [lcscBusy, setLcscBusy] = useState(false);
+  const [datasheetAiBusy, setDatasheetAiBusy] = useState(false);
   const [manufacturerOptions, setManufacturerOptions] = useState<string[]>([]);
   const [normalizeBusy, setNormalizeBusy] = useState(false);
   const [normalized, setNormalized] = useState<NormalizedPackage | null>(null);
@@ -230,6 +234,7 @@ export default function Home() {
   const commitMessage = `Add ${metadata.libraryName || metadata.mpn || "component"} KiCad library assets`;
   const previewLibraryName = sanitizeKiCadName(metadata.libraryName, "Part_Name");
   const previewPackageName = sanitizeKiCadName(metadata.packageName, "Package");
+  const lcscDatasheet = assets.find((asset) => asset.kind === "datasheet");
 
   const targetSummary = useMemo(() => {
     if (!normalized) return [];
@@ -292,7 +297,12 @@ export default function Home() {
       const incoming = await ingestBrowserFiles([new File([file.bytes], file.filename, { type: file.contentType })]);
       if (!incoming.length) throw new Error("The converter did not return supported KiCad files.");
       const inferred = inferMetadataFromAssets(incoming);
-      setAssets(incoming);
+      setAssets((current) => [
+        ...incoming.filter((asset) => asset.kind !== "datasheet"),
+        ...(incoming.some((asset) => asset.kind === "datasheet")
+          ? incoming.filter((asset) => asset.kind === "datasheet")
+          : current.filter((asset) => asset.kind === "datasheet")),
+      ]);
       setMetadata((current) => ({
         ...defaultMetadata,
         category: current.category,
@@ -300,8 +310,9 @@ export default function Home() {
         mpn: inferred.mpn || normalizedId,
         libraryName: inferred.libraryName || inferred.mpn || normalizedId,
         packageName: inferred.packageName || "",
+        title: current.title,
         description: inferred.description || "",
-        datasheet: inferred.datasheet || `https://www.lcsc.com/datasheet/${normalizedId}.pdf`,
+        datasheet: inferred.datasheet || "",
         sourceUrl: file.sourceUrl,
       }));
       setNormalized(null);
@@ -311,6 +322,52 @@ export default function Home() {
       toast.error(error instanceof Error ? error.message : "The LCSC component could not be converted.");
     } finally {
       setLcscBusy(false);
+    }
+  }
+
+  async function addLcscDatasheet(files: File[]) {
+    const file = files[0];
+    if (!file) return;
+    try {
+      const incoming = await ingestBrowserFiles([file]);
+      const datasheet = incoming.find((asset) => asset.kind === "datasheet");
+      if (!datasheet) throw new Error("Choose a PDF datasheet.");
+      setAssets((current) => [...current.filter((asset) => asset.kind !== "datasheet"), datasheet]);
+      setNormalized(null);
+      setCommitResult(null);
+      toast.success("Datasheet attached");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The datasheet could not be read.");
+    }
+  }
+
+  async function generateDatasheetText() {
+    if (!repositoryInfo) {
+      setRepoDialogOpen(true);
+      return toast.error("Connect GitHub before generating datasheet text.");
+    }
+    if (!lcscDatasheet) return toast.error("Upload a PDF datasheet first.");
+    setDatasheetAiBusy(true);
+    try {
+      const suggestion = await describeDatasheetWithActions(token, {
+        bytes: lcscDatasheet.bytes,
+        filename: lcscDatasheet.name,
+        manufacturer: metadata.manufacturer,
+        mpn: metadata.mpn,
+        lcscId: lcscId.trim().toUpperCase(),
+      });
+      setMetadata((current) => ({
+        ...current,
+        title: suggestion.title,
+        description: suggestion.description,
+      }));
+      setNormalized(null);
+      setCommitResult(null);
+      toast.success("Title and description generated; review them before committing");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The datasheet text could not be generated.");
+    } finally {
+      setDatasheetAiBusy(false);
     }
   }
 
@@ -415,7 +472,7 @@ export default function Home() {
                   Connect the Git library
                 </DialogTitle>
                 <DialogDescription className="leading-6 text-slate-400">
-                  Use a fine-grained token with Contents read/write on your library and Actions read/write on this intake repository. The token stays in memory and is cleared when this tab closes.
+                  Use a fine-grained token with Contents read/write on both repositories and Actions read/write on this intake repository. The token stays in memory and is cleared when this tab closes.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid gap-5 py-2">
@@ -610,6 +667,31 @@ export default function Home() {
                       </Button>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">{repositoryInfo ? "Uses the connected GitHub Actions converter; allow up to a minute." : "Connect GitHub to use the converter."}</p>
+                    <div className="mt-5 border-t border-teal-400/15 pt-5">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-200">Datasheet <span className="font-normal text-slate-500">(optional)</span></p>
+                          <p className="mt-1 truncate text-sm text-slate-500">{lcscDatasheet ? lcscDatasheet.name : "Attach the manufacturer PDF for catalog text and archival."}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Button type="button" variant="outline" onClick={() => lcscDatasheetInputRef.current?.click()} className="border-slate-700 bg-slate-950/60 text-slate-300">
+                            <FileText /> {lcscDatasheet ? "Replace PDF" : "Upload PDF"}
+                          </Button>
+                          <Button type="button" onClick={() => void generateDatasheetText()} disabled={!lcscDatasheet || datasheetAiBusy} className="bg-slate-100 text-slate-950 hover:bg-white">
+                            {datasheetAiBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
+                            Suggest text
+                          </Button>
+                        </div>
+                      </div>
+                      <input
+                        ref={lcscDatasheetInputRef}
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        className="hidden"
+                        onChange={(event) => { void addLcscDatasheet(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }}
+                      />
+                      <p className="mt-3 text-xs leading-5 text-slate-500">OpenAI reads the PDF through the private Actions workflow and suggests editable catalog fields. The PDF is also included with the component.</p>
+                    </div>
                   </div>
                 )}
 
@@ -843,6 +925,17 @@ export default function Home() {
                       className="field-input font-mono"
                     />
                   </div>
+                </div>
+
+                <div>
+                  <FieldLabel htmlFor="title">Functional title</FieldLabel>
+                  <Input
+                    id="title"
+                    value={metadata.title}
+                    onChange={(event) => updateMetadata("title", event.target.value)}
+                    placeholder="800–980 MHz voltage-controlled oscillator"
+                    className="field-input"
+                  />
                 </div>
 
                 <div>

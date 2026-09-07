@@ -24,6 +24,7 @@ export type PartMetadata = {
   manufacturer: string;
   mpn: string;
   libraryName: string;
+  title: string;
   packageName: string;
   category: "Custom" | "RF" | "Modules";
   datasheet: string;
@@ -678,6 +679,7 @@ export async function normalizeAssets(
       manufacturer: metadata.manufacturer,
       mpn: metadata.mpn,
       library_name: metadata.libraryName,
+      title: metadata.title,
       description: metadata.description,
       package: metadata.packageName,
       datasheet: metadata.datasheet,

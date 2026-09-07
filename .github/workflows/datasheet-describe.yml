@@ -1,0 +1,59 @@
+name: Datasheet AI description backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Unique request identifier
+        required: true
+        type: string
+      blob_sha:
+        description: Temporary PDF Git blob SHA
+        required: true
+        type: string
+      filename:
+        description: Datasheet filename
+        required: true
+        type: string
+      manufacturer:
+        description: Known manufacturer
+        required: false
+        type: string
+      mpn:
+        description: Known manufacturer part number
+        required: false
+        type: string
+      lcsc_id:
+        description: Known LCSC component ID
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  describe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Check out description wrapper
+        uses: actions/checkout@v5
+      - name: Generate catalog text from datasheet
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          INPUT_REQUEST_ID: ${{ inputs.request_id }}
+          INPUT_BLOB_SHA: ${{ inputs.blob_sha }}
+          INPUT_FILENAME: ${{ inputs.filename }}
+          INPUT_MANUFACTURER: ${{ inputs.manufacturer }}
+          INPUT_MPN: ${{ inputs.mpn }}
+          INPUT_LCSC_ID: ${{ inputs.lcsc_id }}
+          OUTPUT_DIR: datasheet-description-output
+        run: node scripts/describe-datasheet.mjs
+      - name: Return suggestion
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasheet-description-${{ inputs.request_id }}
+          path: datasheet-description-output
+          retention-days: 1
+          if-no-files-found: error
