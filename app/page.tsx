@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
-  Archive,
   ArrowRight,
   Box,
   Check,
@@ -16,8 +15,6 @@ import {
   FolderGit2,
   GitFork,
   GitCommitHorizontal,
-  Link2,
-  ExternalLink,
   LibraryBig,
   Loader2,
   LockKeyhole,
@@ -53,10 +50,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
-import { downloadBrowserFile, inspectBrowserLink, type LinkCandidate, type LinkInspection } from "@/lib/browser-link";
-import { inspectLinkWithActions } from "@/lib/github-actions-link";
+import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
   commitPackage,
+  listCatalogComponents,
   parseRepository,
   testRepository,
   type RepositoryInfo,
@@ -135,10 +132,11 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [assets, setAssets] = useState<IntakeAsset[]>([]);
   const [metadata, setMetadata] = useState<PartMetadata>(defaultMetadata);
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [inspection, setInspection] = useState<LinkInspection | null>(null);
+  const [sourceMode, setSourceMode] = useState<"upload" | "lcsc">("upload");
+  const [lcscId, setLcscId] = useState("");
   const [isDragging, setIsDragging] = useState(false);
-  const [linkBusy, setLinkBusy] = useState(false);
+  const [lcscBusy, setLcscBusy] = useState(false);
+  const [manufacturerOptions, setManufacturerOptions] = useState<string[]>([]);
   const [normalizeBusy, setNormalizeBusy] = useState(false);
   const [normalized, setNormalized] = useState<NormalizedPackage | null>(null);
   const [repositoryInput, setRepositoryInput] = useState("");
@@ -204,11 +202,31 @@ export default function Home() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!repositoryInfo || !repositoryInput || !token) return;
+    let cancelled = false;
+    try {
+      const { owner, repo } = parseRepository(repositoryInput);
+      void listCatalogComponents({ owner, repo, branch: repositoryInfo.branch, token })
+        .then((components) => {
+          if (cancelled) return;
+          const manufacturers = components
+            .map((component) => component.manifest.component.manufacturer?.trim())
+            .filter(Boolean) as string[];
+          setManufacturerOptions([...new Set(manufacturers)].sort((a, b) => a.localeCompare(b)));
+        })
+        .catch(() => {
+          if (!cancelled) setManufacturerOptions([]);
+        });
+    } catch {}
+    return () => { cancelled = true; };
+  }, [repositoryInfo, repositoryInput, token]);
+
   const supportedCount = assets.filter(
     (asset) => asset.kind !== "unsupported" && asset.kind !== "legacy-symbol",
   ).length;
   const packageRequired = assets.some((asset) => asset.kind === "footprint" || asset.kind === "model");
-  const currentStep = normalized ? 3 : assets.length || sourceUrl ? 2 : 1;
+  const currentStep = normalized ? 3 : assets.length ? 2 : 1;
   const commitMessage = `Add ${metadata.libraryName || metadata.mpn || "component"} KiCad library assets`;
   const previewLibraryName = sanitizeKiCadName(metadata.libraryName, "Part_Name");
   const previewPackageName = sanitizeKiCadName(metadata.packageName, "Package");
@@ -262,54 +280,37 @@ export default function Home() {
     setCommitResult(null);
   }
 
-  async function fetchCandidate(candidate: LinkCandidate | { name: string; url: string; kind: "download" }) {
-    setLinkBusy(true);
-    try {
-      const file = repositoryInfo
-        ? await inspectLinkWithActions(token, candidate.url, candidate.filenameHint || candidate.name)
-        : await downloadBrowserFile(candidate);
-      if (file.kind !== "file") throw new Error("That download link returned another web page instead of a file.");
-      await addBrowserFiles([new File([file.bytes], file.filename || candidate.name, { type: file.contentType })]);
-      updateMetadata("sourceUrl", file.sourceUrl);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The linked file could not be downloaded.");
-    } finally {
-      setLinkBusy(false);
+  async function convertLcsc() {
+    if (!repositoryInfo) {
+      setRepoDialogOpen(true);
+      return toast.error("Connect GitHub before converting an LCSC component.");
     }
-  }
-
-  async function inspectLink() {
-    if (!sourceUrl.trim()) return toast.error("Paste a component or CAD file link first.");
-    setLinkBusy(true);
-    setInspection(null);
+    setLcscBusy(true);
     try {
-      const payload = repositoryInfo
-        ? await inspectLinkWithActions(token, sourceUrl.trim())
-        : await inspectBrowserLink(sourceUrl.trim());
-      updateMetadata("sourceUrl", payload.sourceUrl);
-      if (payload.kind === "file") {
-        await addBrowserFiles([new File([payload.bytes], payload.filename, { type: payload.contentType })]);
-        return;
-      }
-      setInspection(payload);
+      const normalizedId = normalizeLcscId(lcscId);
+      const file = await convertLcscWithActions(token, normalizedId);
+      const incoming = await ingestBrowserFiles([new File([file.bytes], file.filename, { type: file.contentType })]);
+      if (!incoming.length) throw new Error("The converter did not return supported KiCad files.");
+      const inferred = inferMetadataFromAssets(incoming);
+      setAssets(incoming);
       setMetadata((current) => ({
-        ...current,
-        manufacturer: current.manufacturer || payload.metadata.manufacturer || "",
-        mpn: current.mpn || payload.metadata.mpn || "",
-        libraryName: current.libraryName || payload.metadata.libraryName || payload.metadata.mpn || "",
-        description: current.description || payload.metadata.description || "",
-        datasheet: current.datasheet || payload.metadata.datasheet || "",
-        sourceUrl: payload.sourceUrl,
+        ...defaultMetadata,
+        category: current.category,
+        manufacturer: inferred.manufacturer || "",
+        mpn: inferred.mpn || normalizedId,
+        libraryName: inferred.libraryName || inferred.mpn || normalizedId,
+        packageName: inferred.packageName || "",
+        description: inferred.description || "",
+        datasheet: inferred.datasheet || `https://www.lcsc.com/datasheet/${normalizedId}.pdf`,
+        sourceUrl: file.sourceUrl,
       }));
-      if (!payload.candidates.length) {
-        toast.info("Metadata found, but no public CAD download was exposed on that page.");
-      } else {
-        toast.success(`${payload.candidates.length} possible download${payload.candidates.length === 1 ? "" : "s"} found`);
-      }
+      setNormalized(null);
+      setCommitResult(null);
+      toast.success(`${normalizedId} converted and component details filled in`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "The link could not be inspected.");
+      toast.error(error instanceof Error ? error.message : "The LCSC component could not be converted.");
     } finally {
-      setLinkBusy(false);
+      setLcscBusy(false);
     }
   }
 
@@ -516,7 +517,7 @@ export default function Home() {
             <p className="mb-2 font-mono text-xs font-medium uppercase tracking-[0.18em] text-teal-300/80">Component intake</p>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-3xl">Turn downloaded CAD into a trusted library part.</h1>
             <p className="mt-2 max-w-2xl text-base leading-7 text-slate-400">
-              Add downloaded KiCad assets, a datasheet, or a direct public link. Names, model references, repository paths, and traceability metadata are normalized together in your browser.
+              Upload existing KiCad assets or enter an LCSC component ID. Names, model references, repository paths, and traceability metadata are normalized together in your browser.
             </p>
           </div>
           <div className="flex items-center gap-3 sm:gap-5">
@@ -544,135 +545,73 @@ export default function Home() {
               </div>
 
               <div className="p-5 sm:p-6">
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Link2 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-500" />
-                    <Input
-                      value={sourceUrl}
-                      onChange={(event) => {
-                        setSourceUrl(event.target.value);
-                        setInspection(null);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") void inspectLink();
-                      }}
-                      placeholder="Paste a component page, CAD file, or ZIP link"
-                      aria-label="Component or CAD file URL"
-                      className="h-11 border-slate-700 bg-slate-950/70 pl-10 text-base text-slate-100 placeholder:text-slate-600 md:text-sm"
-                    />
-                  </div>
-                  <Button
-                    onClick={inspectLink}
-                    disabled={linkBusy || !sourceUrl.trim()}
-                    className="h-11 bg-slate-100 px-5 text-slate-950 hover:bg-white"
+                <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode("upload")}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition ${sourceMode === "upload" ? "bg-slate-800 text-slate-100 shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
                   >
-                    {linkBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
-                    Inspect
-                  </Button>
+                    <UploadCloud className="size-4" /> Upload files
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSourceMode("lcsc")}
+                    className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition ${sourceMode === "lcsc" ? "bg-teal-400/12 text-teal-200 shadow-sm" : "text-slate-500 hover:text-slate-300"}`}
+                  >
+                    <Cpu className="size-4" /> LCSC component
+                  </button>
                 </div>
-                <p className="mt-2 text-sm text-slate-500">
-                  {repositoryInfo
-                    ? "GitHub Actions backend active. Link requests may take 10–60 seconds while a runner starts."
-                    : "Direct-browser mode. Connect GitHub below to use the reliable Actions backend for blocked links."}
-                </p>
 
-                {inspection && (
-                  <div className="mt-4 rounded-xl border border-slate-700/80 bg-slate-950/55 p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-slate-200">{inspection.title || "Component page"}</div>
-                        <div className="mt-1 font-mono text-xs text-slate-600">{new URL(inspection.sourceUrl).hostname}</div>
+                {sourceMode === "upload" ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragEnter={(event) => { event.preventDefault(); setIsDragging(true); }}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDragLeave={(event) => { event.preventDefault(); if (event.currentTarget === event.target) setIsDragging(false); }}
+                      onDrop={(event) => { event.preventDefault(); setIsDragging(false); void addBrowserFiles(Array.from(event.dataTransfer.files)); }}
+                      className={`group relative flex min-h-40 w-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed px-6 py-7 text-center transition ${isDragging ? "border-teal-300 bg-teal-300/8 shadow-[inset_0_0_50px_rgba(45,212,191,0.06)]" : "border-slate-700 bg-[#0b1119] hover:border-slate-600 hover:bg-slate-900/70"}`}
+                    >
+                      <span className="mb-3 grid size-11 place-items-center rounded-xl border border-slate-700 bg-slate-900 text-slate-400 transition group-hover:border-teal-400/30 group-hover:text-teal-300"><UploadCloud className="size-5" /></span>
+                      <span className="text-sm font-medium text-slate-200">Drop a package or choose files</span>
+                      <span className="mt-1 text-sm text-slate-500">KiCad symbols, footprints, STEP/IGES/VRML models, PDF datasheets, or ZIP · 40 MB max</span>
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept={acceptedFileTypes}
+                      className="hidden"
+                      onChange={(event) => { void addBrowserFiles(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }}
+                    />
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-teal-400/20 bg-teal-400/[0.035] p-5 sm:p-6">
+                    <div className="flex items-start gap-3">
+                      <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-teal-400/25 bg-teal-400/10 text-teal-300"><Cpu className="size-5" /></span>
+                      <div>
+                        <h3 className="text-base font-medium text-slate-100">Import from LCSC</h3>
+                        <p className="mt-1 text-sm leading-6 text-slate-400">Enter the catalog ID. The converter gathers the manufacturer, MPN, description, package, datasheet, symbol, footprint, and available 3D model.</p>
                       </div>
-                      <Badge variant="outline" className="shrink-0 border-teal-400/25 bg-teal-400/5 text-teal-300">
-                        {inspection.candidates.length} found
-                      </Badge>
                     </div>
-                    {inspection.librarySearch && (
-                      <a
-                        href={inspection.librarySearch.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-3 flex items-center gap-3 rounded-lg border border-teal-400/30 bg-teal-400/8 px-3 py-3 text-left transition hover:border-teal-300/50 hover:bg-teal-400/12"
-                      >
-                        <LibraryBig className="size-5 shrink-0 text-teal-300" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-teal-100">Search Ultra Librarian first</span>
-                          <span className="block truncate text-xs text-slate-400">{inspection.librarySearch.query} · choose KiCad, download, then drop the bundle below</span>
-                        </span>
-                        <ExternalLink className="size-4 shrink-0 text-teal-300" />
-                      </a>
-                    )}
-                    {inspection.candidates.length > 0 ? (
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        {inspection.candidates.map((candidate) => (
-                          <button
-                            key={candidate.url}
-                            type="button"
-                            onClick={() => void fetchCandidate(candidate)}
-                            disabled={linkBusy}
-                            className="group flex min-w-0 items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2.5 text-left transition hover:border-teal-400/30 hover:bg-slate-800/80 disabled:opacity-50"
-                          >
-                            {candidate.kind === "archive" ? <Archive className="size-4 shrink-0 text-amber-300" /> : <AssetIcon kind={candidate.kind === "download" ? "unsupported" : candidate.kind} className="size-4 shrink-0 text-teal-300" />}
-                            <span className="min-w-0 flex-1 truncate text-sm text-slate-300">{candidate.name}</span>
-                            <span className="font-mono text-[10px] uppercase text-slate-600 group-hover:text-teal-400">ADD</span>
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="mt-3 flex items-center gap-2 text-sm text-amber-200/80">
-                        <AlertTriangle className="size-4" />
-                        No public CAD download was visible. Drop the downloaded files below.
-                      </div>
-                    )}
+                    <div className="mt-5 flex gap-2">
+                      <Input
+                        value={lcscId}
+                        onChange={(event) => setLcscId(event.target.value.toUpperCase())}
+                        onKeyDown={(event) => { if (event.key === "Enter") void convertLcsc(); }}
+                        placeholder="C2040"
+                        aria-label="LCSC component ID"
+                        className="h-11 border-slate-700 bg-slate-950/70 font-mono text-base uppercase text-slate-100 placeholder:text-slate-600"
+                      />
+                      <Button onClick={convertLcsc} disabled={lcscBusy || !lcscId.trim()} className="h-11 bg-teal-300 px-5 text-slate-950 hover:bg-teal-200">
+                        {lcscBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
+                        Convert
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">{repositoryInfo ? "Uses the connected GitHub Actions converter; allow up to a minute." : "Connect GitHub to use the converter."}</p>
                   </div>
                 )}
-
-                <div className="my-5 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.16em] text-slate-700">
-                  <span className="h-px flex-1 bg-slate-800" />
-                  or drop files
-                  <span className="h-px flex-1 bg-slate-800" />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
-                    setIsDragging(true);
-                  }}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDragLeave={(event) => {
-                    event.preventDefault();
-                    if (event.currentTarget === event.target) setIsDragging(false);
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    setIsDragging(false);
-                    void addBrowserFiles(Array.from(event.dataTransfer.files));
-                  }}
-                  className={`group relative flex min-h-36 w-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed px-6 py-7 text-center transition ${
-                    isDragging
-                      ? "border-teal-300 bg-teal-300/8 shadow-[inset_0_0_50px_rgba(45,212,191,0.06)]"
-                      : "border-slate-700 bg-[#0b1119] hover:border-slate-600 hover:bg-slate-900/70"
-                  }`}
-                >
-                  <span className="mb-3 grid size-11 place-items-center rounded-xl border border-slate-700 bg-slate-900 text-slate-400 transition group-hover:border-teal-400/30 group-hover:text-teal-300">
-                    <UploadCloud className="size-5" />
-                  </span>
-                  <span className="text-sm font-medium text-slate-200">Drop a package or choose files</span>
-                  <span className="mt-1 text-sm text-slate-500">KiCad symbols, footprints, STEP/IGES/VRML models, PDF datasheets, or ZIP · 40 MB max</span>
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept={acceptedFileTypes}
-                  className="hidden"
-                  onChange={(event) => {
-                    void addBrowserFiles(Array.from(event.target.files ?? []));
-                    event.currentTarget.value = "";
-                  }}
-                />
 
                 {assets.length > 0 && (
                   <div className="mt-5 overflow-hidden rounded-xl border border-slate-800">
@@ -858,11 +797,18 @@ export default function Home() {
                     <FieldLabel htmlFor="manufacturer">Manufacturer</FieldLabel>
                     <Input
                       id="manufacturer"
+                      list="manufacturer-options"
                       value={metadata.manufacturer}
                       onChange={(event) => updateMetadata("manufacturer", event.target.value)}
                       placeholder="Analog Devices"
                       className="field-input"
                     />
+                    <datalist id="manufacturer-options">
+                      {manufacturerOptions.map((manufacturer) => <option key={manufacturer} value={manufacturer} />)}
+                    </datalist>
+                    {repositoryInfo && manufacturerOptions.length > 0 && (
+                      <p className="mt-1.5 text-xs text-slate-500">Suggestions come from {manufacturerOptions.length} manufacturer{manufacturerOptions.length === 1 ? "" : "s"} already in this library.</p>
+                    )}
                   </div>
                   <div>
                     <FieldLabel htmlFor="mpn">Manufacturer part number <span className="text-teal-300">*</span></FieldLabel>

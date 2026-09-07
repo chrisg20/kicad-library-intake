@@ -1,6 +1,6 @@
 # KiCad Library Intake
 
-A static, browser-based intake console for turning downloaded KiCad CAD assets into a consistently named, reviewable Git commit. It is designed to run on GitHub Pages without a backend.
+A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC component ID into a consistently named, reviewable Git commit.
 
 ## What it does
 
@@ -8,11 +8,9 @@ A static, browser-based intake console for turning downloaded KiCad CAD assets i
 - previews symbol and footprint geometry in 2D, PDF datasheets in-browser, and shaded STEP/IGES/VRML surfaces with orbit, pan, and zoom controls
 
 3D CAD tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1) and OpenCascade, with Three.js rendering. The unmodified runtime, WASM and license are copied from the locked npm package during builds. CAD processing stays local in a cancellable worker; no model is uploaded for preview. Curve-only IGES files cannot produce solid surfaces.
-- imports direct CAD links and inspects component pages when the source permits browser cross-origin access
-- can dispatch link inspection and file downloads through a short-lived GitHub Actions backend when the repository is connected
-- extracts manufacturer and part number from DigiKey and Mouser product links and presents Ultra Librarian as the first CAD search
-- converts LCSC product links into an importable KiCad bundle with [easyeda2kicad 1.0.1](https://github.com/uPesy/easyeda2kicad.py/tree/fff10a38619963d7cb1c57d779655a9ea4572e95) (AGPL-3.0), including symbol, footprint, STEP, and WRL files
-- discovers IGES/IGS links from extensions, encoded/query filenames, labels, and download attributes; detects extensionless IGES content
+- accepts an LCSC `C` ID and converts it into an importable KiCad bundle with [easyeda2kicad 1.0.1](https://github.com/uPesy/easyeda2kicad.py/tree/fff10a38619963d7cb1c57d779655a9ea4572e95) (AGPL-3.0), including symbol, footprint, STEP, and WRL files
+- fills manufacturer, MPN, description, package, and datasheet metadata from the converted LCSC component
+- autocompletes manually entered manufacturers from component manifests already stored in the connected library
 - keeps multiple footprint variants with collision-safe names, a selectable symbol default, and explicit per-footprint model assignments
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)
 - rewrites symbol names, value/metadata fields, footprint names, and 3D model references
@@ -28,9 +26,7 @@ chrisg20/kicad-library-intake. It needs **Contents: read and write** on the targ
 library and **Actions: read and write** on chrisg20/kicad-library-intake. The token
 stays in browser memory and is sent only to api.github.com.
 
-The link backend runs only on demand, accepts public HTTP(S) URLs, validates every
-redirect and DNS result against private/local address ranges, times out remote requests,
-limits pages to 2 MB and files to 40 MB, and deletes returned artifacts after one day.
+The LCSC converter runs only on demand and deletes returned artifacts after one day.
 
 ## Target repository layout
 
@@ -98,14 +94,12 @@ The workflow automatically handles both `username.github.io` repositories and pr
 
 The production output is written to `dist/client`.
 
-## Pages-only link behavior
+## Intake paths
 
-File uploads, ZIP extraction, KiCad processing, review, and GitHub commits all happen locally in the browser. Direct links also work when the remote host allows browser cross-origin requests. Many manufacturer and distributor sites do not; in that case, download the CAD package normally and drop it into the app.
+Manual uploads, ZIP extraction, KiCad processing, review, and GitHub commits happen locally in the browser. LCSC conversion runs through the repository's on-demand GitHub Actions workflow.
 
 ## Safety boundaries
 
-- local/private-network URL targets and nonstandard ports are rejected before a browser request is attempted
-- linked downloads are capped at 30 MB
 - browser uploads are capped at 40 MB each
 - ZIPs are capped at 200 entries and 80 MB expanded
 - legacy `.lib/.dcm` files are identified but blocked from normalization; convert them to `.kicad_sym` in KiCad first

@@ -1,16 +1,6 @@
 import { unzipSync } from "fflate";
 
-import type { DirectLinkFile, LinkCandidate, LinkInspection } from "@/lib/browser-link";
-
-type ActionResult =
-  | {
-      kind: "page";
-      sourceUrl: string;
-      title: string;
-      metadata: LinkInspection["metadata"];
-      librarySearch?: LinkInspection["librarySearch"];
-      candidates: LinkCandidate[];
-    }
+type ConversionResult =
   | {
       kind: "file";
       sourceUrl: string;
@@ -19,6 +9,13 @@ type ActionResult =
       assetPath: string;
     }
   | { kind: "error"; message: string };
+
+export type LcscConversionFile = {
+  filename: string;
+  sourceUrl: string;
+  contentType: string;
+  bytes: Uint8Array;
+};
 
 const textDecoder = new TextDecoder();
 
@@ -40,7 +37,7 @@ async function githubResponse(url: string, token: string, init?: RequestInit) {
     if (response.status === 403) {
       throw new Error("The token needs Actions: read and write permission for this repository.");
     }
-    throw new Error(detail.message || `GitHub returned ${response.status} while running the link fetch.`);
+    throw new Error(detail.message || `GitHub returned ${response.status} while converting the LCSC part.`);
   }
   return response;
 }
@@ -49,22 +46,21 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds));
 }
 
-export async function inspectLinkWithActions(
-  token: string,
-  sourceUrl: string,
-  suggestedName = "",
-): Promise<LinkInspection | DirectLinkFile> {
+export function normalizeLcscId(value: string) {
+  const id = value.trim().toUpperCase();
+  if (!/^C\d+$/.test(id)) throw new Error("Enter an LCSC component ID such as C2040.");
+  return id;
+}
+
+export async function convertLcscWithActions(token: string, value: string): Promise<LcscConversionFile> {
+  const lcscId = normalizeLcscId(value);
   const api = "https://api.github.com/repos/chrisg20/kicad-library-intake";
   const requestId = crypto.randomUUID();
-  await githubResponse(`${api}/actions/workflows/link-fetch.yml/dispatches`, token, {
+  await githubResponse(`${api}/actions/workflows/lcsc-convert.yml/dispatches`, token, {
     method: "POST",
     body: JSON.stringify({
       ref: "main",
-      inputs: {
-        source_url: sourceUrl,
-        request_id: requestId,
-        suggested_name: suggestedName.slice(0, 200),
-      },
+      inputs: { lcsc_id: lcscId, request_id: requestId },
     }),
   });
 
@@ -73,7 +69,7 @@ export async function inspectLinkWithActions(
   while (Date.now() < deadline) {
     await delay(3000);
     const response = await githubResponse(
-      `${api}/actions/artifacts?name=${encodeURIComponent(`link-fetch-${requestId}`)}&per_page=1`,
+      `${api}/actions/artifacts?name=${encodeURIComponent(`lcsc-convert-${requestId}`)}&per_page=1`,
       token,
     );
     const payload = await response.json() as {
@@ -82,16 +78,15 @@ export async function inspectLinkWithActions(
     artifact = payload.artifacts.find((item) => !item.expired);
     if (artifact) break;
   }
-  if (!artifact) throw new Error("The GitHub fetch job did not finish within three minutes.");
+  if (!artifact) throw new Error("The LCSC conversion did not finish within three minutes.");
 
   const archiveResponse = await githubResponse(artifact.archive_download_url, token);
   const files = unzipSync(new Uint8Array(await archiveResponse.arrayBuffer()));
   const resultBytes = files["response.json"];
-  if (!resultBytes) throw new Error("The GitHub fetch job returned an invalid result.");
-  const result = JSON.parse(textDecoder.decode(resultBytes)) as ActionResult;
+  if (!resultBytes) throw new Error("The LCSC conversion returned an invalid result.");
+  const result = JSON.parse(textDecoder.decode(resultBytes)) as ConversionResult;
   if (result.kind === "error") throw new Error(result.message);
-  if (result.kind === "page") return result;
   const asset = files[result.assetPath];
-  if (!asset) throw new Error("The fetched file was missing from the GitHub artifact.");
+  if (!asset) throw new Error("The converted KiCad bundle was missing from the result.");
   return { ...result, bytes: asset };
 }
