@@ -36,6 +36,7 @@ async function describe() {
     headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-5-mini",
+      reasoning: { effort: "low" },
       input: [{
         role: "user",
         content: [
@@ -62,11 +63,15 @@ async function describe() {
           },
         },
       },
-      max_output_tokens: 400,
+      max_output_tokens: 1200,
     }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error?.message || `OpenAI returned ${response.status}.`);
+  if (payload.status === "incomplete") {
+    const reason = payload.incomplete_details?.reason || "unknown reason";
+    throw new Error(`OpenAI returned an incomplete response (${reason}). Try again.`);
+  }
   const outputText = payload.output_text || payload.output
     ?.flatMap((item) => item.content || [])
     .find((item) => item.type === "output_text")?.text;
