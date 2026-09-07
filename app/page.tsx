@@ -17,6 +17,7 @@ import {
   GitFork,
   GitCommitHorizontal,
   Link2,
+  LibraryBig,
   Loader2,
   LockKeyhole,
   PackageCheck,
@@ -28,6 +29,7 @@ import {
 import { toast } from "sonner";
 
 import { AssetPreviewGallery } from "@/components/asset-preview";
+import { CatalogView } from "@/components/catalog-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -148,6 +150,7 @@ export default function Home() {
     url: string;
     filesChanged: number;
   } | null>(null);
+  const [activeView, setActiveView] = useState<"intake" | "catalog">("intake");
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -326,7 +329,7 @@ export default function Home() {
       <Toaster theme="dark" position="bottom-right" richColors />
 
       <header className="border-b border-slate-800/90 bg-[#090d13]/90 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-[1480px] items-center justify-between px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-16 max-w-[1480px] items-center justify-between gap-3 px-4 py-2 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <div className="relative grid size-9 place-items-center rounded-lg border border-teal-400/35 bg-teal-400/10 text-teal-300 shadow-[0_0_24px_rgba(45,212,191,0.12)]">
               <Cpu className="size-5" />
@@ -336,6 +339,15 @@ export default function Home() {
               <div className="text-[15px] font-semibold tracking-tight text-slate-100">KiCad Library Intake</div>
               <div className="font-mono text-[11px] tracking-wide text-slate-500">NORMALIZE · REVIEW · COMMIT</div>
             </div>
+          </div>
+
+          <div className="ml-auto hidden items-center rounded-lg border border-slate-800 bg-slate-950/50 p-1 sm:flex">
+            <button type="button" onClick={() => setActiveView("intake")} className={`rounded-md px-3 py-1.5 text-sm transition ${activeView === "intake" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`}>
+              Intake
+            </button>
+            <button type="button" onClick={() => setActiveView("catalog")} className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${activeView === "catalog" ? "bg-slate-800 text-slate-100" : "text-slate-500 hover:text-slate-300"}`}>
+              <LibraryBig className="size-4" /> Catalog
+            </button>
           </div>
 
           <Dialog open={repoDialogOpen} onOpenChange={setRepoDialogOpen}>
@@ -424,7 +436,22 @@ export default function Home() {
         </div>
       </header>
 
+      <div className="grid grid-cols-2 border-b border-slate-800 bg-slate-950/40 p-2 sm:hidden">
+        <button type="button" onClick={() => setActiveView("intake")} className={`rounded-md px-3 py-2 text-sm ${activeView === "intake" ? "bg-slate-800 text-slate-100" : "text-slate-500"}`}>Intake</button>
+        <button type="button" onClick={() => setActiveView("catalog")} className={`rounded-md px-3 py-2 text-sm ${activeView === "catalog" ? "bg-slate-800 text-slate-100" : "text-slate-500"}`}>Catalog</button>
+      </div>
+
       <div className="mx-auto max-w-[1480px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        {activeView === "catalog" ? (
+          <CatalogView
+            repositoryInfo={repositoryInfo}
+            repositoryInput={repositoryInput}
+            branch={branch}
+            token={token}
+            onConnect={() => setRepoDialogOpen(true)}
+          />
+        ) : (
+        <>
         <section className="mb-6 flex flex-col gap-5 border-b border-slate-800/80 pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="mb-2 font-mono text-xs font-medium uppercase tracking-[0.18em] text-teal-300/80">Component intake</p>
@@ -929,6 +956,8 @@ export default function Home() {
             </section>
           </aside>
         </div>
+        </>
+        )}
       </div>
     </main>
   );

@@ -508,6 +508,25 @@ export function mergeKicadSymbolLibraries(existing: string | null, incoming: str
   return `${markIntakeGenerator(merged).trimEnd()}\n`;
 }
 
+export function extractAndRemoveSymbol(source: string, symbolName: string) {
+  const matching = symbolBlocks(source).find((block) => firstSymbolName(block.source) === symbolName);
+  if (!matching) throw new Error(`Symbol ${symbolName} was not found in its library.`);
+  const remaining = `${source.slice(0, matching.start).trimEnd()}\n${source.slice(matching.end).trimStart()}`;
+  const version = source.match(/\(version\s+([^\s)]+)/)?.[1] ?? "20231120";
+  const extracted = [
+    `(kicad_symbol_lib (version ${version}) (generator kicad-library-intake)`,
+    `  ${matching.source.trim()}`,
+    ")",
+    "",
+  ].join("\n");
+  return { remaining: markIntakeGenerator(remaining), extracted };
+}
+
+export function replaceLibraryPrefix(source: string, fromCategory: string, toCategory: string) {
+  const escaped = fromCategory.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return source.replace(new RegExp(`([\"'])${escaped}:`, "g"), `$1${toCategory}:`);
+}
+
 export function footprintSuffix(asset: IntakeAsset) {
   return asset.footprintSuffix?.trim() || firstFootprintName(textDecoder.decode(asset.bytes)) || basename(asset.name).replace(/\.kicad_mod$/i, "");
 }

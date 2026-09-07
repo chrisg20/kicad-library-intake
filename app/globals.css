@@ -230,6 +230,25 @@ textarea {
   pointer-events: none;
 }
 
+.catalog-model .preview-stage {
+  width: 15rem;
+  height: 10rem;
+  min-height: 10rem;
+}
+
+.catalog-model .preview-stage > [role="status"] {
+  max-width: 9rem;
+  font-size: 0.72rem;
+}
+
+.catalog-model .preview-stage button {
+  display: none;
+}
+
+.catalog-model .preview-grid-label {
+  display: none;
+}
+
 @media (min-width: 640px) {
   .panel-heading {
     padding-inline: 1.5rem;
