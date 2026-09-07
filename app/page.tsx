@@ -17,6 +17,7 @@ import {
   GitFork,
   GitCommitHorizontal,
   Link2,
+  ExternalLink,
   LibraryBig,
   Loader2,
   LockKeyhole,
@@ -586,6 +587,21 @@ export default function Home() {
                         {inspection.candidates.length} found
                       </Badge>
                     </div>
+                    {inspection.librarySearch && (
+                      <a
+                        href={inspection.librarySearch.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 flex items-center gap-3 rounded-lg border border-teal-400/30 bg-teal-400/8 px-3 py-3 text-left transition hover:border-teal-300/50 hover:bg-teal-400/12"
+                      >
+                        <LibraryBig className="size-5 shrink-0 text-teal-300" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium text-teal-100">Search Ultra Librarian first</span>
+                          <span className="block truncate text-xs text-slate-400">{inspection.librarySearch.query} · choose KiCad, download, then drop the bundle below</span>
+                        </span>
+                        <ExternalLink className="size-4 shrink-0 text-teal-300" />
+                      </a>
+                    )}
                     {inspection.candidates.length > 0 ? (
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
                         {inspection.candidates.map((candidate) => (

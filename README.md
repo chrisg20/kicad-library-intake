@@ -10,6 +10,8 @@ A static, browser-based intake console for turning downloaded KiCad CAD assets i
 3D CAD tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1) and OpenCascade, with Three.js rendering. The unmodified runtime, WASM and license are copied from the locked npm package during builds. CAD processing stays local in a cancellable worker; no model is uploaded for preview. Curve-only IGES files cannot produce solid surfaces.
 - imports direct CAD links and inspects component pages when the source permits browser cross-origin access
 - can dispatch link inspection and file downloads through a short-lived GitHub Actions backend when the repository is connected
+- extracts manufacturer and part number from DigiKey and Mouser product links and presents Ultra Librarian as the first CAD search
+- converts LCSC product links into an importable KiCad bundle with [easyeda2kicad 1.0.1](https://github.com/uPesy/easyeda2kicad.py/tree/fff10a38619963d7cb1c57d779655a9ea4572e95) (AGPL-3.0), including symbol, footprint, STEP, and WRL files
 - discovers IGES/IGS links from extensions, encoded/query filenames, labels, and download attributes; detects extensionless IGES content
 - keeps multiple footprint variants with collision-safe names, a selectable symbol default, and explicit per-footprint model assignments
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)

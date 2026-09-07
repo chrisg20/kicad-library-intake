@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 const sourceUrl = process.env.INPUT_SOURCE_URL || "";
 const requestId = process.env.INPUT_REQUEST_ID || "";
@@ -87,6 +88,69 @@ function isDigikeyProduct(value) {
   }
 }
 
+function distributorIdentity(value) {
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
+    let manufacturer = "";
+    let mpn = "";
+    if (/(^|\.)digikey\.[a-z.]+$/i.test(url.hostname)) {
+      const detail = parts.findIndex((part) => part.toLowerCase() === "detail");
+      if (detail >= 0) [manufacturer, mpn] = [parts[detail + 1] || "", parts[detail + 2] || ""];
+    } else if (/(^|\.)mouser\.[a-z.]+$/i.test(url.hostname)) {
+      const detail = parts.findIndex((part) => part.toLowerCase() === "productdetail");
+      if (detail >= 0) [manufacturer, mpn] = [parts[detail + 1] || "", parts[detail + 2] || ""];
+    }
+    return mpn ? { manufacturer: manufacturer.replace(/-/g, " "), mpn } : null;
+  } catch {
+    return null;
+  }
+}
+
+function librarySearch(mpn) {
+  return mpn ? {
+    provider: "Ultra Librarian",
+    query: mpn,
+    url: `https://app.ultralibrarian.com/Search?queryText=${encodeURIComponent(mpn)}`,
+  } : undefined;
+}
+
+function lcscId(value) {
+  try {
+    const url = new URL(value);
+    if (!/(^|\.)lcsc\.com$/i.test(url.hostname)) return "";
+    return decodeURIComponent(`${url.pathname} ${url.search}`).match(/(?:^|[^a-z0-9])(C\d{2,})(?=[^a-z0-9]|$)/i)?.[1]?.toUpperCase() || "";
+  } catch {
+    return "";
+  }
+}
+
+function run(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", ...options });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with status ${code}.`)));
+  });
+}
+
+async function convertLcsc(id, validatedSourceUrl) {
+  const stage = path.resolve(outputDir, "lcsc");
+  const outputBase = path.join(stage, `LCSC_${id}`);
+  await mkdir(stage, { recursive: true });
+  await run("easyeda2kicad", ["--full", `--lcsc_id=${id}`, "--output", outputBase]);
+  const name = `LCSC_${id}_easyeda2kicad.zip`;
+  const assetPath = path.posix.join("asset", name);
+  await mkdir(path.join(outputDir, "asset"), { recursive: true });
+  await run("zip", ["-q", "-r", path.resolve(outputDir, assetPath), "."], { cwd: stage });
+  return {
+    kind: "file",
+    sourceUrl: validatedSourceUrl,
+    filename: name,
+    contentType: "application/zip",
+    assetPath,
+  };
+}
+
 function markdownText(value) {
   return String(value || "")
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
@@ -128,6 +192,7 @@ function parseReaderPage(markdown, pageUrl) {
       description: markdownField(markdown, "Detailed Description") || markdownField(markdown, "Description"),
       datasheet: candidates.find((item) => item.kind === "datasheet")?.url || "",
     },
+    librarySearch: librarySearch(mpn),
     candidates,
   };
 }
@@ -284,34 +349,67 @@ await mkdir(outputDir, { recursive: true });
 let result;
 try {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Invalid request ID.");
-  let fetched;
-  try {
-    fetched = await fetchSafe(sourceUrl);
-  } catch (error) {
-    if (isDigikeyProduct(sourceUrl)) {
-      result = await fetchDigikeyReader(sourceUrl);
-    } else {
-      throw error;
+  const identity = distributorIdentity(sourceUrl);
+  const requestedLcscId = lcscId(sourceUrl);
+  if (requestedLcscId) {
+    const validated = await validate(sourceUrl);
+    result = await convertLcsc(requestedLcscId, validated.toString());
+  } else {
+    let fetched;
+    try {
+      fetched = await fetchSafe(sourceUrl);
+    } catch (error) {
+      if (isDigikeyProduct(sourceUrl)) {
+        try {
+          result = await fetchDigikeyReader(sourceUrl);
+        } catch {
+          if (!identity) throw error;
+        }
+      }
+      if (!result && identity) {
+        const validated = await validate(sourceUrl);
+        result = {
+          kind: "page",
+          sourceUrl: validated.toString(),
+          title: identity.mpn,
+          metadata: { ...identity, libraryName: identity.mpn, description: "", datasheet: "" },
+          librarySearch: librarySearch(identity.mpn),
+          candidates: [],
+        };
+      }
+      if (!result) throw error;
     }
-  }
-  if (result) {
-    // A vendor-specific public metadata fallback already produced the result.
-  } else {
-  const { response, url } = fetched;
-  const type = (response.headers.get("content-type") || "application/octet-stream").toLowerCase();
-  if (type.includes("text/html") || type.includes("application/xhtml+xml")) {
-    const bytes = await readLimited(response, MAX_PAGE_BYTES);
-    const html = new TextDecoder().decode(bytes);
-    const candidates = discover(html, url);
-    result = { kind: "page", sourceUrl: url.toString(), ...metadata(html, candidates), candidates };
-  } else {
-    const bytes = await readLimited(response, MAX_FILE_BYTES);
-    const name = filename(response, url, bytes).replace(/[^A-Za-z0-9._ -]/g, "_").slice(0, 180) || "download";
-    const assetPath = path.posix.join("asset", name);
-    await mkdir(path.join(outputDir, "asset"), { recursive: true });
-    await writeFile(path.join(outputDir, assetPath), bytes);
-    result = { kind: "file", sourceUrl: url.toString(), filename: name, contentType: type, assetPath };
-  }
+    if (!result) {
+      const { response, url } = fetched;
+      const type = (response.headers.get("content-type") || "application/octet-stream").toLowerCase();
+      if (type.includes("text/html") || type.includes("application/xhtml+xml")) {
+        const bytes = await readLimited(response, MAX_PAGE_BYTES);
+        const html = new TextDecoder().decode(bytes);
+        const candidates = discover(html, url);
+        const page = metadata(html, candidates);
+        const mpn = page.metadata.mpn || identity?.mpn || "";
+        result = {
+          kind: "page",
+          sourceUrl: url.toString(),
+          ...page,
+          metadata: {
+            ...page.metadata,
+            mpn,
+            libraryName: page.metadata.libraryName || mpn,
+            manufacturer: page.metadata.manufacturer || identity?.manufacturer || "",
+          },
+          librarySearch: librarySearch(mpn),
+          candidates,
+        };
+      } else {
+        const bytes = await readLimited(response, MAX_FILE_BYTES);
+        const name = filename(response, url, bytes).replace(/[^A-Za-z0-9._ -]/g, "_").slice(0, 180) || "download";
+        const assetPath = path.posix.join("asset", name);
+        await mkdir(path.join(outputDir, "asset"), { recursive: true });
+        await writeFile(path.join(outputDir, assetPath), bytes);
+        result = { kind: "file", sourceUrl: url.toString(), filename: name, contentType: type, assetPath };
+      }
+    }
   }
 } catch (error) {
   result = { kind: "error", message: error instanceof Error ? error.message : "The fetch job failed." };

@@ -14,6 +14,7 @@ export type LinkInspection = {
   sourceUrl: string;
   title: string;
   metadata: Partial<PartMetadata>;
+  librarySearch?: { provider: "Ultra Librarian"; query: string; url: string };
   candidates: LinkCandidate[];
 };
 
@@ -27,6 +28,34 @@ export type DirectLinkFile = {
 
 const MAX_REMOTE_BYTES = 30 * 1024 * 1024;
 const MAX_PAGE_BYTES = 2 * 1024 * 1024;
+
+function distributorIdentity(input: string) {
+  try {
+    const url = validateRemoteUrl(input);
+    const parts = url.pathname.split("/").filter(Boolean).map(decoded);
+    let manufacturer = "";
+    let mpn = "";
+    if (/(^|\.)digikey\.[a-z.]+$/i.test(url.hostname)) {
+      const detail = parts.findIndex((part) => part.toLowerCase() === "detail");
+      if (detail >= 0) [manufacturer, mpn] = [parts[detail + 1] || "", parts[detail + 2] || ""];
+    } else if (/(^|\.)mouser\.[a-z.]+$/i.test(url.hostname)) {
+      const detail = parts.findIndex((part) => part.toLowerCase() === "productdetail");
+      if (detail >= 0) [manufacturer, mpn] = [parts[detail + 1] || "", parts[detail + 2] || ""];
+    }
+    if (!mpn) return null;
+    return { manufacturer: manufacturer.replace(/-/g, " "), mpn };
+  } catch {
+    return null;
+  }
+}
+
+function librarySearch(mpn: string) {
+  return mpn ? {
+    provider: "Ultra Librarian" as const,
+    query: mpn,
+    url: `https://app.ultralibrarian.com/Search?queryText=${encodeURIComponent(mpn)}`,
+  } : undefined;
+}
 
 async function browserFetch(input: string) {
   const requestedUrl = validateRemoteUrl(input);
@@ -184,7 +213,23 @@ function looksLikeFile(contentType: string) {
 }
 
 export async function inspectBrowserLink(input: string): Promise<LinkInspection | DirectLinkFile> {
-  const { response, finalUrl } = await browserFetch(input);
+  const identity = distributorIdentity(input);
+  let fetched;
+  try {
+    fetched = await browserFetch(input);
+  } catch (error) {
+    if (!identity) throw error;
+    const sourceUrl = validateRemoteUrl(input).toString();
+    return {
+      kind: "page",
+      sourceUrl,
+      title: identity.mpn,
+      metadata: { ...identity, libraryName: identity.mpn },
+      librarySearch: librarySearch(identity.mpn),
+      candidates: [],
+    };
+  }
+  const { response, finalUrl } = fetched;
   const contentType = (response.headers.get("content-type") || "application/octet-stream").toLowerCase();
   if (looksLikeFile(contentType)) {
     const bytes = await readResponse(response, MAX_REMOTE_BYTES);
@@ -193,12 +238,12 @@ export async function inspectBrowserLink(input: string): Promise<LinkInspection 
   const html = new TextDecoder().decode(await readResponse(response, MAX_PAGE_BYTES));
   const product = findProductJson(html);
   const title = stripTags(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "");
-  const mpn = String(product?.mpn ?? product?.sku ?? metaContent(html, "product:retailer_item_id") ?? "");
-  const manufacturer = nestedName(product?.manufacturer) || nestedName(product?.brand);
+  const mpn = String(product?.mpn ?? product?.sku ?? metaContent(html, "product:retailer_item_id") ?? identity?.mpn ?? "");
+  const manufacturer = nestedName(product?.manufacturer) || nestedName(product?.brand) || identity?.manufacturer || "";
   const description = String(product?.description ?? metaContent(html, "description") ?? metaContent(html, "og:description") ?? "");
   const candidates = discoverCandidates(html, finalUrl);
   const datasheet = candidates.find((candidate) => candidate.kind === "datasheet")?.url ?? "";
-  return { kind: "page", sourceUrl: finalUrl.toString(), title, metadata: { mpn, libraryName: mpn, manufacturer, description, datasheet }, candidates };
+  return { kind: "page", sourceUrl: finalUrl.toString(), title, metadata: { mpn, libraryName: mpn, manufacturer, description, datasheet }, librarySearch: librarySearch(mpn), candidates };
 }
 
 export async function downloadBrowserFile(candidate: Pick<LinkCandidate, "name" | "url" | "filenameHint">): Promise<DirectLinkFile> {

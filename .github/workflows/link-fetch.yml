@@ -26,6 +26,12 @@ jobs:
     steps:
       - name: Check out fetcher
         uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install LCSC converter
+        run: python -m pip install --disable-pip-version-check "easyeda2kicad @ git+https://github.com/uPesy/easyeda2kicad.py@fff10a38619963d7cb1c57d779655a9ea4572e95"
       - name: Fetch public link
         env:
           INPUT_SOURCE_URL: ${{ inputs.source_url }}

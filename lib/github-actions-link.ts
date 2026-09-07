@@ -8,6 +8,7 @@ type ActionResult =
       sourceUrl: string;
       title: string;
       metadata: LinkInspection["metadata"];
+      librarySearch?: LinkInspection["librarySearch"];
       candidates: LinkCandidate[];
     }
   | {

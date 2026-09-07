@@ -36,6 +36,25 @@ test("extracts product metadata and downloadable links from a CORS-readable page
   assert.equal(result.candidates[0].url, "https://example.com/cad/ADL5606.zip");
 });
 
+test("offers an Ultra Librarian search from DigiKey URL identity when the page is blocked", async () => {
+  globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
+  const result = await inspectBrowserLink("https://www.digikey.com/en/products/detail/crystek-corporation/CVCO55CL-0800-0980/1644111");
+  assert.equal(result.kind, "page");
+  assert.equal(result.metadata.manufacturer, "crystek corporation");
+  assert.equal(result.metadata.mpn, "CVCO55CL-0800-0980");
+  assert.equal(result.librarySearch.provider, "Ultra Librarian");
+  assert.match(result.librarySearch.url, /queryText=CVCO55CL-0800-0980$/);
+});
+
+test("extracts Mouser manufacturer and MPN directly from a blocked product URL", async () => {
+  globalThis.fetch = async () => new Response("blocked", { status: 403 });
+  const result = await inspectBrowserLink("https://www.mouser.com/ProductDetail/Analog-Devices/ADL5606ARKZ-R7?qs=test");
+  assert.equal(result.kind, "page");
+  assert.equal(result.metadata.manufacturer, "Analog Devices");
+  assert.equal(result.metadata.mpn, "ADL5606ARKZ-R7");
+  assert.match(result.librarySearch.url, /ADL5606ARKZ-R7$/);
+});
+
 test("explains the manual-download fallback when CORS blocks a source", async () => {
   globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
   await assert.rejects(inspectBrowserLink("https://vendor.example/part"), /download the CAD file yourself/i);
