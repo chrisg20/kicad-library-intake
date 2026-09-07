@@ -67,10 +67,82 @@ async function fetchSafe(value) {
       url = await validate(new URL(location, url).toString());
       continue;
     }
-    if (!response.ok) throw new Error(`The source returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      const error = new Error(`The source returned HTTP ${response.status}.`);
+      error.status = response.status;
+      error.url = url.toString();
+      throw error;
+    }
     return { response, url };
   }
   throw new Error("The source redirected too many times.");
+}
+
+function isDigikeyProduct(value) {
+  try {
+    const url = new URL(value);
+    return /(^|\.)digikey\.[a-z.]+$/i.test(url.hostname) && /\/products\/detail\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function markdownText(value) {
+  return String(value || "")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_`#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function markdownField(markdown, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return markdownText(markdown.match(new RegExp(`^\\|\\s*${escaped}\\s*\\|\\s*(.*?)\\s*\\|$`, "im"))?.[1] || "");
+}
+
+function parseReaderPage(markdown, pageUrl) {
+  const candidates = [];
+  const seen = new Set();
+  for (const match of markdown.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi)) {
+    try {
+      const url = new URL(match[2]);
+      url.protocol = "https:";
+      const label = markdownText(match[1]);
+      const kind = kindFor(url, label);
+      if (kind === "download" || seen.has(url.toString())) continue;
+      seen.add(url.toString());
+      candidates.push({ name: label || url.pathname.split("/").at(-1), url: url.toString(), kind, filenameHint: label });
+    } catch {}
+  }
+  const mpn = markdownField(markdown, "Manufacturer Product Number") ||
+    new URL(pageUrl).pathname.split("/").filter(Boolean).at(-2) || "";
+  return {
+    kind: "page",
+    sourceUrl: pageUrl,
+    title: markdownText(markdown.match(/^Title:\s*(.+)$/im)?.[1] || mpn),
+    metadata: {
+      mpn,
+      libraryName: mpn,
+      manufacturer: markdownField(markdown, "Manufacturer"),
+      description: markdownField(markdown, "Detailed Description") || markdownField(markdown, "Description"),
+      datasheet: candidates.find((item) => item.kind === "datasheet")?.url || "",
+    },
+    candidates,
+  };
+}
+
+async function fetchDigikeyReader(value) {
+  const source = new URL(value);
+  source.hash = "";
+  const readerUrl = `https://r.jina.ai/http://${source.hostname}${source.pathname}${source.search}`;
+  const { response } = await fetchSafe(readerUrl);
+  const type = (response.headers.get("content-type") || "").toLowerCase();
+  if (!type.includes("text/plain") && !type.includes("text/markdown")) {
+    throw new Error("DigiKey blocked the request and its public product-data fallback was unavailable.");
+  }
+  const markdown = new TextDecoder().decode(await readLimited(response, MAX_PAGE_BYTES));
+  return parseReaderPage(markdown, source.toString());
 }
 
 async function readLimited(response, maximum) {
@@ -212,7 +284,20 @@ await mkdir(outputDir, { recursive: true });
 let result;
 try {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Invalid request ID.");
-  const { response, url } = await fetchSafe(sourceUrl);
+  let fetched;
+  try {
+    fetched = await fetchSafe(sourceUrl);
+  } catch (error) {
+    if (isDigikeyProduct(sourceUrl)) {
+      result = await fetchDigikeyReader(sourceUrl);
+    } else {
+      throw error;
+    }
+  }
+  if (result) {
+    // A vendor-specific public metadata fallback already produced the result.
+  } else {
+  const { response, url } = fetched;
   const type = (response.headers.get("content-type") || "application/octet-stream").toLowerCase();
   if (type.includes("text/html") || type.includes("application/xhtml+xml")) {
     const bytes = await readLimited(response, MAX_PAGE_BYTES);
@@ -226,6 +311,7 @@ try {
     await mkdir(path.join(outputDir, "asset"), { recursive: true });
     await writeFile(path.join(outputDir, assetPath), bytes);
     result = { kind: "file", sourceUrl: url.toString(), filename: name, contentType: type, assetPath };
+  }
   }
 } catch (error) {
   result = { kind: "error", message: error instanceof Error ? error.message : "The fetch job failed." };
