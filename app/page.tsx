@@ -32,6 +32,7 @@ import { AssetPreviewGallery } from "@/components/asset-preview";
 import { CatalogView } from "@/components/catalog-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -95,6 +96,8 @@ const kindLabels: Record<AssetKind | "metadata", string> = {
   metadata: "Manifest",
 };
 
+const tokenStorageKey = "kicad-intake-github-token";
+
 function AssetIcon({ kind, className = "size-4" }: { kind: AssetKind | "metadata"; className?: string }) {
   if (kind === "symbol") return <FileCode2 className={className} />;
   if (kind === "footprint") return <FileBox className={className} />;
@@ -141,6 +144,7 @@ export default function Home() {
   const [branch, setBranch] = useState("main");
   const [token, setToken] = useState("");
   const [connectionBusy, setConnectionBusy] = useState(false);
+  const [rememberToken, setRememberToken] = useState(false);
   const [repositoryInfo, setRepositoryInfo] = useState<RepositoryInfo | null>(null);
   const [repoDialogOpen, setRepoDialogOpen] = useState(false);
   const [commitBusy, setCommitBusy] = useState(false);
@@ -153,13 +157,50 @@ export default function Home() {
   const [activeView, setActiveView] = useState<"intake" | "catalog">("intake");
 
   useEffect(() => {
+    let cancelled = false;
     const frame = window.requestAnimationFrame(() => {
       const savedRepository = window.localStorage.getItem("kicad-intake-repository");
       const savedBranch = window.localStorage.getItem("kicad-intake-branch");
+      const savedToken = window.localStorage.getItem(tokenStorageKey);
       if (savedRepository) setRepositoryInput(savedRepository);
       if (savedBranch) setBranch(savedBranch);
+      if (savedToken) {
+        setToken(savedToken);
+        setRememberToken(true);
+      }
+      if (savedRepository && savedToken) {
+        const restoredBranch = savedBranch || "main";
+        setConnectionBusy(true);
+        try {
+          const { owner, repo } = parseRepository(savedRepository);
+          void testRepository({ owner, repo, branch: restoredBranch, token: savedToken })
+            .then((info) => {
+              if (cancelled) return;
+              setRepositoryInfo(info);
+              setBranch(info.branch);
+            })
+            .catch(() => {
+              if (cancelled) return;
+              window.localStorage.removeItem(tokenStorageKey);
+              setToken("");
+              setRememberToken(false);
+              toast.error("The saved GitHub connection expired. Enter a current token to reconnect.");
+            })
+            .finally(() => {
+              if (!cancelled) setConnectionBusy(false);
+            });
+        } catch {
+          window.localStorage.removeItem(tokenStorageKey);
+          setToken("");
+          setRememberToken(false);
+          setConnectionBusy(false);
+        }
+      }
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   const supportedCount = assets.filter(
@@ -294,6 +335,8 @@ export default function Home() {
       setBranch(info.branch);
       window.localStorage.setItem("kicad-intake-repository", info.fullName);
       window.localStorage.setItem("kicad-intake-branch", info.branch);
+      if (rememberToken) window.localStorage.setItem(tokenStorageKey, token);
+      else window.localStorage.removeItem(tokenStorageKey);
       setRepositoryInput(info.fullName);
       setRepoDialogOpen(false);
       toast.success(`Connected to ${info.fullName}`);
@@ -406,7 +449,7 @@ export default function Home() {
                     <Input
                       id="token"
                       type="password"
-                      autoComplete="off"
+                      autoComplete="current-password"
                       value={token}
                       onChange={(event) => {
                         setToken(event.target.value);
@@ -417,9 +460,24 @@ export default function Home() {
                     />
                   </div>
                 </div>
+                <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/40 p-3">
+                  <Checkbox
+                    checked={rememberToken}
+                    onCheckedChange={(checked) => {
+                      const enabled = checked === true;
+                      setRememberToken(enabled);
+                      if (!enabled) window.localStorage.removeItem(tokenStorageKey);
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-200">Remember on this device</span>
+                    <span className="mt-1 block text-sm leading-5 text-slate-500">Automatically reconnect next time. The token is stored in this browser, so use this only on a trusted personal device.</span>
+                  </span>
+                </label>
                 <div className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-sm leading-5 text-slate-400">
                   <LockKeyhole className="mt-0.5 size-4 shrink-0 text-slate-500" />
-                  Repository name and branch are remembered on this device. The token is never written to browser storage.
+                  Repository and branch are always remembered. Your token is stored only when you enable the option above.
                 </div>
               </div>
               <DialogFooter>
