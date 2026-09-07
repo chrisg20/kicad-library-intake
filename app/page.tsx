@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
+import { libraryCategories } from "@/lib/categories";
 import { describeDatasheetWithActions } from "@/lib/datasheet-ai";
 import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
@@ -79,7 +80,7 @@ const defaultMetadata: PartMetadata = {
   libraryName: "",
   title: "",
   packageName: "",
-  category: "RF",
+  category: "CG_RF_Amplifiers",
   datasheet: "",
   description: "",
   verified: "Unverified",
@@ -964,14 +965,14 @@ export default function Home() {
                 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                   <div>
                     <FieldLabel>Library category</FieldLabel>
-                    <Select value={metadata.category} onValueChange={(value) => updateMetadata("category", value as PartMetadata["category"])}>
+                    <Select value={metadata.category} onValueChange={(value) => updateMetadata("category", value)}>
                       <SelectTrigger className="h-10 w-full border-slate-700 bg-slate-950/70 text-slate-100">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
-                        <SelectItem value="RF">RF</SelectItem>
-                        <SelectItem value="Custom">Custom</SelectItem>
-                        <SelectItem value="Modules">Modules</SelectItem>
+                        {libraryCategories.map((category) => (
+                          <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>

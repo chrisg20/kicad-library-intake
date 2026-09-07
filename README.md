@@ -38,17 +38,17 @@ scrape a PDF when the source metadata is missing.
 
 ```text
 symbols/
-  Custom.kicad_sym
-  RF.kicad_sym
-  Modules.kicad_sym
+  CG_Resistors.kicad_sym
+  CG_RF_Amplifiers.kicad_sym
+  ...
 footprints/
-  Custom.pretty/
-  RF.pretty/
-  Modules.pretty/
+  CG_Resistors.pretty/
+  CG_RF_Amplifiers.pretty/
+  ...
 3dmodels/
-  Custom.3dshapes/
-  RF.3dshapes/
-  Modules.3dshapes/
+  CG_Resistors.3dshapes/
+  CG_RF_Amplifiers.3dshapes/
+  ...
 datasheets/
 metadata/
 ```
@@ -64,17 +64,22 @@ Manufacturer: Analog Devices
 MPN:          ADL5606ARKZ-R7
 Library name: ADL5606
 Package:      SOT-89-3
-Category:     RF
+Category:     CG_RF_Amplifiers (shown as “RF Amplifiers” in the intake UI)
 ```
 
 the package becomes:
 
 ```text
-RF:ADL5606
-RF:ADL5606_SOT-89-3
-${MY_KICAD_LIB}/3dmodels/RF.3dshapes/ADL5606_SOT-89-3.step
-metadata/RF/ADL5606.json
+CG_RF_Amplifiers:ADL5606
+CG_RF_Amplifiers:ADL5606_SOT-89-3
+${MY_KICAD_LIB}/3dmodels/CG_RF_Amplifiers.3dshapes/ADL5606_SOT-89-3.step
+metadata/CG_RF_Amplifiers/ADL5606.json
 ```
+
+The intake provides 40 component categories. Their stored KiCad library names all use
+the `CG_` prefix and filesystem-safe underscores so they remain grouped together in
+KiCad. The intake and catalog display the corresponding clean category labels without
+the prefix.
 
 ## GitHub access
 

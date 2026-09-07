@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { displayCategory, libraryCategories } from "@/lib/categories";
 import {
   fetchRepositoryFile,
   listCatalogComponents,
@@ -28,7 +29,7 @@ type Props = {
   onConnect: () => void;
 };
 
-const preferredSections = ["RF", "Custom", "Modules"];
+const preferredSections = libraryCategories.map((category) => category.id);
 
 function configFor(props: Props): GitHubConfig {
   const { owner, repo } = parseRepository(props.repositoryInput);
@@ -177,7 +178,7 @@ export function CatalogView(props: Props) {
           <nav className="scrollbar-none sticky top-0 z-20 -mx-4 flex gap-2 overflow-x-auto border-y border-slate-800 bg-[#080b10]/95 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
             {sections.filter((section) => visible.some((item) => item.manifest.library.category === section)).map((section) => (
               <a key={section} href={`#section-${section}`} className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-300 hover:border-teal-400/35 hover:text-teal-200">
-                {section} <span className="ml-1 font-mono text-xs text-slate-600">{visible.filter((item) => item.manifest.library.category === section).length}</span>
+                {displayCategory(section)} <span className="ml-1 font-mono text-xs text-slate-600">{visible.filter((item) => item.manifest.library.category === section).length}</span>
               </a>
             ))}
           </nav>
@@ -188,7 +189,7 @@ export function CatalogView(props: Props) {
             return (
               <section key={section} id={`section-${section}`} className="panel scroll-mt-20 overflow-hidden">
                 <div className="panel-heading">
-                  <div><span className="panel-kicker">SECTION</span><h2 className="panel-title text-lg">{section}</h2></div>
+                  <div><span className="panel-kicker">SECTION</span><h2 className="panel-title text-lg">{displayCategory(section)}</h2></div>
                   <Badge variant="outline" className="border-slate-700 bg-slate-900 text-slate-300">{rows.length} component{rows.length === 1 ? "" : "s"}</Badge>
                 </div>
                 <div className="overflow-x-auto">
@@ -220,7 +221,7 @@ export function CatalogView(props: Props) {
                             <td className="px-5 py-4">
                               <Select value={section} disabled={movingPath === component.manifestPath} onValueChange={(value) => value && void move(component, value)}>
                                 <SelectTrigger className="w-40 border-slate-700 bg-slate-900"><MoveRight className="size-4" /><SelectValue /></SelectTrigger>
-                                <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">{sections.map((target) => <SelectItem key={target} value={target}>{target}</SelectItem>)}</SelectContent>
+                                <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">{sections.map((target) => <SelectItem key={target} value={target}>{displayCategory(target)}</SelectItem>)}</SelectContent>
                               </Select>
                               {movingPath === component.manifestPath && <span className="mt-2 flex items-center gap-2 text-xs text-slate-500"><Loader2 className="size-3 animate-spin" /> Committing move…</span>}
                             </td>

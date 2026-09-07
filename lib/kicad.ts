@@ -26,7 +26,7 @@ export type PartMetadata = {
   libraryName: string;
   title: string;
   packageName: string;
-  category: "Custom" | "RF" | "Modules";
+  category: string;
   datasheet: string;
   description: string;
   verified: "Unverified" | "Datasheet checked" | "Fabricated" | "Electrically tested";
