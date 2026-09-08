@@ -1,6 +1,6 @@
 import { unzipSync } from "fflate";
 import { sniffModelExtension } from "./file-format.ts";
-import { sanitizeCatalogTitle } from "./categories.ts";
+import { sanitizeCatalogTitle, sanitizeManufacturerName } from "./categories.ts";
 
 export type AssetKind =
   | "symbol"
@@ -215,7 +215,7 @@ export function inferMetadataFromAssets(assets: IntakeAsset[]): Partial<PartMeta
     const value = propertyValue(source, "Value");
     result.mpn = propertyValue(source, "MPN") || value || symbolName;
     result.libraryName = value || symbolName || result.mpn;
-    result.manufacturer = sanitizeCatalogTitle(propertyValue(source, "Manufacturer"));
+    result.manufacturer = sanitizeManufacturerName(propertyValue(source, "Manufacturer"));
     result.datasheet = propertyValue(source, "Datasheet");
     result.description = propertyValue(source, "Description");
     const footprintRef = propertyValue(source, "Footprint");

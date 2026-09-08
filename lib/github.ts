@@ -4,7 +4,7 @@ import {
   replaceLibraryPrefix,
   type NormalizedAsset,
 } from "@/lib/kicad";
-import { sanitizeCatalogTitle } from "@/lib/categories";
+import { sanitizeCatalogTitle, sanitizeManufacturerName } from "@/lib/categories";
 
 export type GitHubConfig = {
   owner: string;
@@ -328,7 +328,7 @@ export async function updateCatalogComponentMetadata(
   const manifest = structuredClone(component.manifest);
   manifest.component = {
     ...manifest.component,
-    manufacturer: sanitizeCatalogTitle(values.manufacturer),
+    manufacturer: sanitizeManufacturerName(values.manufacturer),
     mpn: values.mpn.trim(),
     library_name: values.library_name.trim(),
     title: sanitizeCatalogTitle(values.title || ""),

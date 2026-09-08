@@ -56,3 +56,11 @@ export function sanitizeCatalogTitle(title: string) {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
+
+export function sanitizeManufacturerName(name: string) {
+  return sanitizeCatalogTitle(name)
+    .replace(/\([^)]*\)/g, "")
+    .replace(/[()]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

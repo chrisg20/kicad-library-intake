@@ -31,22 +31,75 @@ function datasheetUrlFromSymbol(source) {
   return match[1].replace(/\\([\\"])/g, "$1").trim();
 }
 
+function normalizedDatasheetUrl(value) {
+  const trimmed = value.trim().replaceAll("&amp;", "&");
+  if (trimmed.startsWith("//")) return `https:${trimmed}`;
+  if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:/i, "https:");
+  return trimmed;
+}
+
+function embeddedPdfUrl(source) {
+  const decoded = source
+    .replace(/\\u002f/gi, "/")
+    .replace(/\\\//g, "/")
+    .replaceAll("&amp;", "&");
+  const matches = decoded.match(/https:\/\/datasheet\.lcsc\.com\/[^"'\s<>]+\.pdf(?:\?[^"'\s<>]*)?/gi) || [];
+  return matches.find((url) => url.toUpperCase().includes(lcscId)) || matches[0] || "";
+}
+
+async function fetchLcscPdf(datasheetUrl) {
+  const productUrl = `https://www.lcsc.com/product-detail/${lcscId}.html`;
+  const browserHeaders = {
+    Accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    Referer: productUrl,
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36",
+  };
+  let cookie = "";
+  try {
+    const productResponse = await fetch(productUrl, { headers: browserHeaders, redirect: "follow" });
+    cookie = productResponse.headers.getSetCookie?.().map((value) => value.split(";", 1)[0]).join("; ") || "";
+  } catch {
+    // The PDF request can still succeed without the product-page cookie.
+  }
+
+  const attempts = [
+    { ...browserHeaders, ...(cookie ? { Cookie: cookie } : {}) },
+    { ...browserHeaders, Referer: "https://www.lcsc.com/" },
+  ];
+  let lastStatus = 0;
+  const pendingUrls = [datasheetUrl];
+  const visitedUrls = new Set();
+  while (pendingUrls.length) {
+    const url = pendingUrls.shift();
+    if (!url || visitedUrls.has(url)) continue;
+    visitedUrls.add(url);
+    for (const headers of attempts) {
+      const response = await fetch(url, { redirect: "follow", headers });
+      lastStatus = response.status;
+      if (!response.ok) continue;
+      const declaredSize = Number(response.headers.get("content-length") || 0);
+      if (declaredSize > 40 * 1024 * 1024) throw new Error("The LCSC datasheet exceeds the 40 MB intake limit.");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length > 40 * 1024 * 1024) throw new Error("The LCSC datasheet exceeds the 40 MB intake limit.");
+      const decoded = new TextDecoder().decode(bytes);
+      if (decoded.startsWith("%PDF-")) return bytes;
+      const embedded = embeddedPdfUrl(decoded);
+      if (embedded && !visitedUrls.has(embedded) && !pendingUrls.includes(embedded)) pendingUrls.push(embedded);
+    }
+  }
+  console.warn(`LCSC datasheet download returned HTTP ${lastStatus || "error"}.`);
+  return null;
+}
+
 async function addDatasheet(stage) {
   const symbolPath = (await filesUnder(stage)).find((file) => file.toLowerCase().endsWith(".kicad_sym"));
   if (!symbolPath) return false;
-  const datasheetUrl = datasheetUrlFromSymbol(await readFile(symbolPath, "utf8"));
+  const datasheetUrl = normalizedDatasheetUrl(datasheetUrlFromSymbol(await readFile(symbolPath, "utf8")));
   if (!/^https:\/\//i.test(datasheetUrl)) return false;
-
-  const response = await fetch(datasheetUrl, {
-    redirect: "follow",
-    headers: { "User-Agent": "kicad-library-intake/1.0" },
-  });
-  if (!response.ok) return false;
-  const declaredSize = Number(response.headers.get("content-length") || 0);
-  if (declaredSize > 40 * 1024 * 1024) return false;
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.length > 40 * 1024 * 1024 || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") return false;
+  const bytes = await fetchLcscPdf(datasheetUrl);
+  if (!bytes) return false;
   await writeFile(path.join(stage, `LCSC_${lcscId}_datasheet.pdf`), bytes);
+  console.log("Attached LCSC datasheet PDF to the converted bundle.");
   return true;
 }
 

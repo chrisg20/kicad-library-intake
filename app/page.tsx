@@ -50,7 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
-import { displayCategory, libraryCategories, sanitizeCatalogTitle } from "@/lib/categories";
+import { displayCategory, libraryCategories, sanitizeCatalogTitle, sanitizeManufacturerName } from "@/lib/categories";
 import { describeDatasheetWithActions } from "@/lib/datasheet-ai";
 import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
@@ -215,7 +215,7 @@ export default function Home() {
         .then((components) => {
           if (cancelled) return;
           const manufacturers = components
-            .map((component) => sanitizeCatalogTitle(component.manifest.component.manufacturer || ""))
+            .map((component) => sanitizeManufacturerName(component.manifest.component.manufacturer || ""))
             .filter(Boolean) as string[];
           setManufacturerOptions([...new Set(manufacturers)].sort((a, b) => a.localeCompare(b)));
         })
@@ -311,7 +311,7 @@ export default function Home() {
       setMetadata((current) => ({
         ...defaultMetadata,
         category: current.category,
-        manufacturer: sanitizeCatalogTitle(inferred.manufacturer || ""),
+        manufacturer: sanitizeManufacturerName(inferred.manufacturer || ""),
         mpn: inferredMpn,
         libraryName: inferredLibraryName,
         packageName: inferred.packageName || "",
@@ -887,7 +887,7 @@ export default function Home() {
                       id="manufacturer"
                       list="manufacturer-options"
                       value={metadata.manufacturer}
-                      onChange={(event) => updateMetadata("manufacturer", sanitizeCatalogTitle(event.target.value))}
+                      onChange={(event) => updateMetadata("manufacturer", sanitizeManufacturerName(event.target.value))}
                       placeholder="Analog Devices"
                       className="field-input"
                     />
