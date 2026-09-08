@@ -187,8 +187,10 @@ function categoryPath(path: string, fromCategory: string, toCategory: string) {
   const prefixes = [
     [`footprints/${fromCategory}.pretty/`, `footprints/${toCategory}.pretty/`],
     [`3dmodels/${fromCategory}.3dshapes/`, `3dmodels/${toCategory}.3dshapes/`],
+    [`datasheets/${fromCategory}/`, `datasheets/${toCategory}/`],
   ];
   for (const [from, to] of prefixes) if (path.startsWith(from)) return `${to}${path.slice(from.length)}`;
+  if (path.startsWith("datasheets/")) return `datasheets/${toCategory}/${path.split("/").at(-1)}`;
   return path;
 }
 

@@ -108,6 +108,18 @@ assert.equal(sanitizeCatalogTitle("低噪声 Low-noise 発振器 oscillator"), "
 assert.equal(sanitizeCatalogTitle("低噪声発振器"), "");
 
 const result = await normalizeAssets(assets, metadata);
+const resultWithDatasheet = await normalizeAssets([
+  ...assets,
+  {
+    id: "datasheet",
+    name: "source.pdf",
+    sourceName: "source.pdf",
+    bytes: encoder.encode("%PDF-1.7"),
+    kind: "datasheet",
+    warnings: [],
+  },
+], metadata);
+assert.ok(resultWithDatasheet.files.some((file) => file.outputPath === "datasheets/RF/ADL5606.pdf"));
 
 const variants = await normalizeAssets([
   ...assets,

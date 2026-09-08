@@ -53,10 +53,13 @@ footprints/
   CG_RF_Amplifiers.3dshapes/
   ...
 datasheets/
+  CG_Resistors/
+  CG_RF_Amplifiers/
+  ...
 metadata/
 ```
 
-Footprints reference models through `${MY_KICAD_LIB}` so the repository remains portable between computers.
+Footprints reference models through `${MY_KICAD_LIB}` so the repository remains portable between computers. Datasheets are grouped by category and move with their component when its catalog category changes.
 
 ## Naming rules
 

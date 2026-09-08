@@ -636,14 +636,13 @@ export async function normalizeAssets(
     });
   }
 
-  const manufacturerDir = sanitizeKiCadName(metadata.manufacturer, "Unknown-Manufacturer");
   for (const [index, asset] of datasheets.entries()) {
     const suffix = datasheets.length > 1 ? `_${index + 1}` : "";
     normalized.push({
       id: asset.id,
       kind: "datasheet",
       inputName: asset.sourceName,
-      outputPath: `datasheets/${manufacturerDir}/${partName}${suffix}.pdf`,
+      outputPath: `datasheets/${category}/${partName}${suffix}.pdf`,
       bytes: asset.bytes,
       strategy: "replace",
       notes: ["Local datasheet copy"],

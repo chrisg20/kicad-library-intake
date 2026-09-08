@@ -115,6 +115,7 @@ export function CatalogView(props: Props) {
   const [editBusy, setEditBusy] = useState(false);
   const [moveTarget, setMoveTarget] = useState("");
   const [moveItem, setMoveItem] = useState<CatalogComponent | null>(null);
+  const [selectedSection, setSelectedSection] = useState(preferredSections[0] ?? "");
 
   const sections = useMemo(() => {
     const discovered = components.map((item) => item.manifest.library.category);
@@ -135,12 +136,24 @@ export function CatalogView(props: Props) {
     ].some((value) => value?.toLowerCase().includes(query)));
   }, [components, search]);
 
+  const populatedSections = useMemo(
+    () => sections.filter((section) => components.some((item) => item.manifest.library.category === section)),
+    [components, sections],
+  );
+
+  const rows = useMemo(
+    () => visible.filter((item) => item.manifest.library.category === selectedSection),
+    [selectedSection, visible],
+  );
+
   async function refresh() {
     if (!props.repositoryInfo) return props.onConnect();
     setLoading(true);
     try {
       const result = await listCatalogComponents(configFor(props));
       setComponents(result);
+      const available = [...new Set(result.map((item) => item.manifest.library.category))];
+      setSelectedSection((current) => available.includes(current) ? current : (available[0] ?? ""));
       setLoaded(true);
       toast.success(`${result.length} component${result.length === 1 ? "" : "s"} loaded`);
     } catch (error) {
@@ -190,6 +203,7 @@ export function CatalogView(props: Props) {
     try {
       await moveCatalogComponent(configFor(props), component, toCategory);
       setComponents(await listCatalogComponents(configFor(props)));
+      setSelectedSection(toCategory);
       setMoveItem(null);
       toast.success(`${component.manifest.component.library_name} moved to ${displayCategory(toCategory)}`);
     } catch (error) {
@@ -218,7 +232,7 @@ export function CatalogView(props: Props) {
         <div>
           <p className="mb-2 font-mono text-xs font-medium uppercase tracking-[0.18em] text-teal-300/80">Library catalog</p>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-50 sm:text-3xl">Browse every component.</h1>
-          <p className="mt-2 text-base text-slate-400">Grouped by library section and backed directly by Git.</p>
+          <p className="mt-2 text-base text-slate-400">Browse one library category at a time, backed directly by Git.</p>
         </div>
         <div className="flex w-full gap-2 lg:w-auto">
           <div className="relative min-w-0 flex-1 lg:w-80">
@@ -235,27 +249,36 @@ export function CatalogView(props: Props) {
         <section className="panel grid min-h-72 place-items-center p-8 text-center">
           <div><Box className="mx-auto size-7 text-slate-600" /><p className="mt-3 text-slate-400">Load the manifests from {props.repositoryInfo.fullName}.</p></div>
         </section>
-      ) : visible.length === 0 ? (
+      ) : components.length === 0 ? (
         <section className="panel grid min-h-72 place-items-center p-8 text-center">
-          <div><Search className="mx-auto size-7 text-slate-600" /><p className="mt-3 text-slate-400">No catalog components match this search.</p></div>
+          <div><Box className="mx-auto size-7 text-slate-600" /><p className="mt-3 text-slate-400">This catalog does not contain any components yet.</p></div>
         </section>
       ) : (
-        <div className="space-y-8">
-          <nav className="scrollbar-none sticky top-0 z-20 -mx-4 flex gap-2 overflow-x-auto border-y border-slate-800 bg-[#080b10]/95 px-4 py-3 backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-            {sections.filter((section) => visible.some((item) => item.manifest.library.category === section)).map((section) => (
-              <a key={section} href={`#section-${section}`} className="rounded-md border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-slate-300 hover:border-teal-400/35 hover:text-teal-200">
-                {displayCategory(section)} <span className="ml-1 font-mono text-xs text-slate-600">{visible.filter((item) => item.manifest.library.category === section).length}</span>
-              </a>
-            ))}
-          </nav>
+        <div className="space-y-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label className="text-sm font-medium text-slate-300" htmlFor="catalog-category">Category</label>
+            <Select value={selectedSection} onValueChange={setSelectedSection}>
+              <SelectTrigger id="catalog-category" className="w-full border-slate-700 bg-slate-950/70 sm:w-80">
+                <SelectValue placeholder="Choose a category" />
+              </SelectTrigger>
+              <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
+                {populatedSections.map((section) => (
+                  <SelectItem key={section} value={section}>
+                    {displayCategory(section)} ({components.filter((item) => item.manifest.library.category === section).length})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-          {sections.map((section) => {
-            const rows = visible.filter((item) => item.manifest.library.category === section);
-            if (!rows.length) return null;
-            return (
-              <section key={section} id={`section-${section}`} className="panel scroll-mt-20 overflow-hidden">
+          {rows.length === 0 ? (
+            <section className="panel grid min-h-72 place-items-center p-8 text-center">
+              <div><Search className="mx-auto size-7 text-slate-600" /><p className="mt-3 text-slate-400">No components in {displayCategory(selectedSection)} match this search.</p></div>
+            </section>
+          ) : (
+            <section className="panel overflow-hidden">
                 <div className="panel-heading">
-                  <div><span className="panel-kicker">SECTION</span><h2 className="panel-title text-lg">{displayCategory(section)}</h2></div>
+                  <div><span className="panel-kicker">CATEGORY</span><h2 className="panel-title text-lg">{displayCategory(selectedSection)}</h2></div>
                   <Badge variant="outline" className="border-slate-700 bg-slate-900 text-slate-300">{rows.length} component{rows.length === 1 ? "" : "s"}</Badge>
                 </div>
                 <div className="overflow-x-auto">
@@ -307,9 +330,8 @@ export function CatalogView(props: Props) {
                     </tbody>
                   </table>
                 </div>
-              </section>
-            );
-          })}
+            </section>
+          )}
         </div>
       )}
 
