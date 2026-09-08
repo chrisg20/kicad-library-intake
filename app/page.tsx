@@ -50,7 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
-import { displayCategory, libraryCategories } from "@/lib/categories";
+import { displayCategory, libraryCategories, sanitizeCatalogTitle } from "@/lib/categories";
 import { describeDatasheetWithActions } from "@/lib/datasheet-ai";
 import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
@@ -297,6 +297,11 @@ export default function Home() {
       const incoming = await ingestBrowserFiles([new File([file.bytes], file.filename, { type: file.contentType })]);
       if (!incoming.length) throw new Error("The converter did not return supported KiCad files.");
       const inferred = inferMetadataFromAssets(incoming);
+      const inferredMpn = sanitizeCatalogTitle(inferred.mpn || "") || normalizedId;
+      const inferredLibraryName = sanitizeKiCadName(
+        sanitizeCatalogTitle(inferred.libraryName || ""),
+        sanitizeKiCadName(inferredMpn, normalizedId),
+      );
       setAssets((current) => [
         ...incoming.filter((asset) => asset.kind !== "datasheet"),
         ...(incoming.some((asset) => asset.kind === "datasheet")
@@ -307,10 +312,10 @@ export default function Home() {
         ...defaultMetadata,
         category: current.category,
         manufacturer: inferred.manufacturer || "",
-        mpn: inferred.mpn || normalizedId,
-        libraryName: inferred.libraryName || inferred.mpn || normalizedId,
+        mpn: inferredMpn,
+        libraryName: inferredLibraryName,
         packageName: inferred.packageName || "",
-        title: current.title,
+        title: "",
         description: inferred.description || "",
         datasheet: inferred.datasheet || "",
         sourceUrl: file.sourceUrl,

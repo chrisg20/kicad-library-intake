@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Box, EllipsisVertical, ExternalLink, FileBox, FileCode2, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
+import { Box, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { ModelViewport } from "@/components/model-viewport";
@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { displayCategory, libraryCategories } from "@/lib/categories";
+import { displayCategory, libraryCategories, sanitizeCatalogTitle } from "@/lib/categories";
 import {
   fetchRepositoryFile,
   listCatalogComponents,
@@ -266,11 +266,15 @@ export function CatalogView(props: Props) {
                     <tbody className="divide-y divide-slate-800/80">
                       {rows.map((component) => {
                         const { manifest } = component;
+                        const displayLibraryName = sanitizeCatalogTitle(manifest.component.library_name)
+                          || sanitizeCatalogTitle(manifest.component.mpn)
+                          || "Component";
+                        const displayTitle = sanitizeCatalogTitle(manifest.component.title || "") || displayLibraryName;
                         return (
                           <tr key={component.manifestPath} className="align-top bg-slate-950/15">
                             <td className="px-5 py-5">
-                              <div className="text-sm font-semibold text-teal-200">{manifest.component.title || manifest.component.library_name}</div>
-                              {manifest.component.title && <div className="mt-1 font-mono text-xs text-slate-500">{manifest.component.library_name}</div>}
+                              <div className="text-sm font-semibold text-teal-200">{displayTitle}</div>
+                              {displayTitle !== displayLibraryName && <div className="mt-1 font-mono text-xs text-slate-500">{displayLibraryName}</div>}
                               <div className="mt-1 text-sm text-slate-400">{manifest.component.manufacturer || "Unknown manufacturer"}</div>
                               <div className="mt-1 font-mono text-xs text-slate-600">{manifest.component.mpn}</div>
                               {manifest.provenance.source_url && <a href={manifest.provenance.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-teal-300">Source <ExternalLink className="size-3" /></a>}
@@ -281,6 +285,7 @@ export function CatalogView(props: Props) {
                               {manifest.library.symbol && <Badge variant="outline" className="border-cyan-400/20 text-cyan-300"><FileCode2 /> Symbol</Badge>}
                               {manifest.library.footprints.length > 0 && <Badge variant="outline" className="border-amber-400/20 text-amber-200"><FileBox /> {manifest.library.footprints.length} footprint{manifest.library.footprints.length === 1 ? "" : "s"}</Badge>}
                               {manifest.assets.some((asset) => asset.type === "model") && <Badge variant="outline" className="border-teal-400/20 text-teal-300"><Box /> 3D</Badge>}
+                              {(Boolean(manifest.component.datasheet) || manifest.assets.some((asset) => asset.type === "datasheet")) && <Badge variant="outline" className="border-violet-400/20 text-violet-300"><FileText /> Datasheet</Badge>}
                             </div></td>
                             <td className="px-4 py-4"><CatalogModel component={component} config={configFor(props)} /></td>
                             <td className="px-5 py-4 text-right">

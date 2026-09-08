@@ -20,6 +20,8 @@ A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC compo
 - creates one atomic GitHub commit through the Git Data REST API
 - writes a SHA-256 provenance manifest for every imported component
 - provides catalog meatball actions for editing component metadata or moving the complete component between library sections
+- shows a Datasheet asset badge when a local PDF or datasheet URL is present
+- removes Chinese and Japanese characters from LCSC-derived and AI-generated display titles, falling back to the MPN or LCSC ID when needed
 
 ## GitHub token permissions
 

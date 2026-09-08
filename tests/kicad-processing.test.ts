@@ -105,6 +105,7 @@ assert.equal(new Set(libraryCategories.map(({ id }) => id)).size, 40);
 assert.ok(libraryCategories.every(({ id, label }) => id.startsWith("CG_") && !label.startsWith("CG_")));
 assert.equal(displayCategory("CG_RF_Filters_Passives"), "RF Filters & Passives");
 assert.equal(sanitizeCatalogTitle("低噪声 Low-noise 発振器 oscillator"), "Low-noise oscillator");
+assert.equal(sanitizeCatalogTitle("低噪声発振器"), "");
 
 const result = await normalizeAssets(assets, metadata);
 
