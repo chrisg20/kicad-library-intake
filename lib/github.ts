@@ -79,7 +79,7 @@ async function githubRequest<T>(config: GitHubConfig, path: string, init?: Reque
     headers: {
       Accept: "application/vnd.github+json",
       Authorization: `Bearer ${config.token}`,
-      "X-GitHub-Api-Version": "2026-03-10",
+      "X-GitHub-Api-Version": "2022-11-28",
       ...(init?.headers ?? {}),
     },
   });
@@ -125,14 +125,14 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-async function fetchExistingFile(config: GitHubConfig, path: string): Promise<Uint8Array | null> {
+async function fetchExistingFile(config: GitHubConfig, path: string, ref = config.branch): Promise<Uint8Array | null> {
   const response = await fetch(
-    `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(config.branch)}`,
+    `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${encodePath(path)}?ref=${encodeURIComponent(ref)}`,
     {
       headers: {
         Accept: "application/vnd.github.raw+json",
         Authorization: `Bearer ${config.token}`,
-        "X-GitHub-Api-Version": "2026-03-10",
+        "X-GitHub-Api-Version": "2022-11-28",
       },
     },
   );
@@ -194,28 +194,40 @@ function categoryPath(path: string, fromCategory: string, toCategory: string) {
   return path;
 }
 
-export async function moveCatalogComponent(
+function isRefUpdateConflict(error: unknown) {
+  return error instanceof Error && /not a fast forward|bad object state|reference update failed/i.test(error.message);
+}
+
+async function moveCatalogComponentAttempt(
   config: GitHubConfig,
   component: CatalogComponent,
   toCategory: string,
 ) {
-  const fromCategory = component.manifest.library.category;
-  if (fromCategory === toCategory) throw new Error("Choose a different section.");
-  if (!/^[A-Za-z0-9_-]+$/.test(toCategory)) throw new Error("Section names may only contain letters, numbers, hyphens, and underscores.");
   const owner = encodeURIComponent(config.owner);
   const repo = encodeURIComponent(config.repo);
   const refPath = config.branch.split("/").map(encodeURIComponent).join("/");
   const ref = await githubRequest<{ object: { sha: string } }>(config, `/repos/${owner}/${repo}/git/ref/heads/${refPath}`);
   const parentSha = ref.object.sha;
   const parent = await githubRequest<{ tree: { sha: string } }>(config, `/repos/${owner}/${repo}/git/commits/${parentSha}`);
+  const latestManifestBytes = await fetchExistingFile(config, component.manifestPath, parentSha);
+  if (!latestManifestBytes) throw new Error("This component changed in the repository. The catalog has been refreshed; try the move again.");
+  const latestComponent: CatalogComponent = {
+    manifestPath: component.manifestPath,
+    manifest: JSON.parse(textDecoder.decode(latestManifestBytes)) as CatalogManifest,
+  };
+  const fromCategory = latestComponent.manifest.library.category;
+  if (fromCategory !== component.manifest.library.category) {
+    throw new Error("This component changed categories in the repository. The catalog has been refreshed.");
+  }
   const writes = new Map<string, Uint8Array>();
   const deletes = new Set<string>();
 
-  for (const asset of component.manifest.assets) {
+  for (const asset of latestComponent.manifest.assets) {
     if (asset.type === "symbol" || asset.type === "metadata") continue;
     const destination = categoryPath(asset.target_path, fromCategory, toCategory);
     if (destination === asset.target_path) continue;
-    const bytes = await fetchRepositoryFile(config, asset.target_path);
+    const bytes = await fetchExistingFile(config, asset.target_path, parentSha);
+    if (!bytes) throw new Error(`${asset.target_path} was not found in the repository snapshot. Refresh the catalog and try again.`);
     const movedBytes = asset.type === "footprint"
       ? textEncoder.encode(textDecoder.decode(bytes).replaceAll(`${fromCategory}.3dshapes`, `${toCategory}.3dshapes`))
       : bytes;
@@ -223,19 +235,21 @@ export async function moveCatalogComponent(
     deletes.add(asset.target_path);
   }
 
-  if (component.manifest.library.symbol) {
-    const symbolName = component.manifest.library.symbol.split(":").slice(1).join(":");
+  if (latestComponent.manifest.library.symbol) {
+    const symbolName = latestComponent.manifest.library.symbol.split(":").slice(1).join(":");
     const sourcePath = `symbols/${fromCategory}.kicad_sym`;
     const targetPath = `symbols/${toCategory}.kicad_sym`;
-    const source = textDecoder.decode(await fetchRepositoryFile(config, sourcePath));
+    const sourceBytes = await fetchExistingFile(config, sourcePath, parentSha);
+    if (!sourceBytes) throw new Error(`${sourcePath} was not found in the repository snapshot. Refresh the catalog and try again.`);
+    const source = textDecoder.decode(sourceBytes);
     const { remaining, extracted } = extractAndRemoveSymbol(source, symbolName);
-    const targetBytes = await fetchExistingFile(config, targetPath);
+    const targetBytes = await fetchExistingFile(config, targetPath, parentSha);
     const target = targetBytes ? textDecoder.decode(targetBytes) : null;
     writes.set(sourcePath, textEncoder.encode(remaining));
     writes.set(targetPath, textEncoder.encode(mergeKicadSymbolLibraries(target, [replaceLibraryPrefix(extracted, fromCategory, toCategory)])));
   }
 
-  const manifest = structuredClone(component.manifest);
+  const manifest = structuredClone(latestComponent.manifest);
   manifest.library.category = toCategory;
   manifest.library.symbol = manifest.library.symbol?.replace(`${fromCategory}:`, `${toCategory}:`) ?? null;
   manifest.library.footprints = manifest.library.footprints.map((value) => value.replace(`${fromCategory}:`, `${toCategory}:`));
@@ -246,10 +260,10 @@ export async function moveCatalogComponent(
       ? `symbols/${toCategory}.kicad_sym`
       : categoryPath(asset.target_path, fromCategory, toCategory),
   }));
-  const manifestName = component.manifestPath.split("/").at(-1)!;
+  const manifestName = latestComponent.manifestPath.split("/").at(-1)!;
   const nextManifestPath = `metadata/${toCategory}/${manifestName}`;
   writes.set(nextManifestPath, textEncoder.encode(`${JSON.stringify(manifest, null, 2)}\n`));
-  deletes.add(component.manifestPath);
+  deletes.add(latestComponent.manifestPath);
 
   const blobs = await Promise.all([...writes].map(async ([path, bytes]) => {
     const blob = await githubRequest<{ sha: string }>(config, `/repos/${owner}/${repo}/git/blobs`, {
@@ -282,6 +296,28 @@ export async function moveCatalogComponent(
     body: JSON.stringify({ sha: commit.sha, force: false }),
   });
   return { sha: commit.sha, shortSha: commit.sha.slice(0, 7), url: commit.html_url };
+}
+
+export async function moveCatalogComponent(
+  config: GitHubConfig,
+  component: CatalogComponent,
+  toCategory: string,
+) {
+  const fromCategory = component.manifest.library.category;
+  if (fromCategory === toCategory) throw new Error("Choose a different section.");
+  if (!/^[A-Za-z0-9_-]+$/.test(toCategory)) throw new Error("Section names may only contain letters, numbers, hyphens, and underscores.");
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await moveCatalogComponentAttempt(config, component, toCategory);
+    } catch (error) {
+      if (!isRefUpdateConflict(error)) throw error;
+      if (attempt === 2) {
+        throw new Error("The repository kept changing while this component was moving. The catalog has been refreshed; try once more.");
+      }
+    }
+  }
+  throw new Error("The component could not be moved.");
 }
 
 export async function updateCatalogComponentMetadata(

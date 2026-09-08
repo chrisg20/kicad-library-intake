@@ -207,6 +207,11 @@ export function CatalogView(props: Props) {
       setMoveItem(null);
       toast.success(`${component.manifest.component.library_name} moved to ${displayCategory(toCategory)}`);
     } catch (error) {
+      try {
+        setComponents(await listCatalogComponents(configFor(props)));
+      } catch {
+        // Preserve the move error when the follow-up refresh also fails.
+      }
       toast.error(error instanceof Error ? error.message : "The component could not be moved.");
     } finally {
       setMovingPath("");
