@@ -27,6 +27,10 @@ on:
         description: Known LCSC component ID
         required: false
         type: string
+      category_options:
+        description: Allowed component categories
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -48,6 +52,7 @@ jobs:
           INPUT_MANUFACTURER: ${{ inputs.manufacturer }}
           INPUT_MPN: ${{ inputs.mpn }}
           INPUT_LCSC_ID: ${{ inputs.lcsc_id }}
+          INPUT_CATEGORY_OPTIONS: ${{ inputs.category_options }}
           OUTPUT_DIR: datasheet-description-output
         run: node scripts/describe-datasheet.mjs
       - name: Return suggestion

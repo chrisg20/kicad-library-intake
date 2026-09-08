@@ -4,6 +4,7 @@ import {
   replaceLibraryPrefix,
   type NormalizedAsset,
 } from "@/lib/kicad";
+import { sanitizeCatalogTitle } from "@/lib/categories";
 
 export type GitHubConfig = {
   owner: string;
@@ -34,7 +35,6 @@ export type CatalogManifest = {
     symbol: string | null;
     footprints: string[];
     default_footprint: string | null;
-    verified: string;
   };
   provenance: { source_url?: string; imported_at?: string; tool?: string };
   assets: Array<{ type: string; source_file: string; target_path: string; sha256?: string }>;
@@ -44,6 +44,11 @@ export type CatalogComponent = {
   manifestPath: string;
   manifest: CatalogManifest;
 };
+
+export type CatalogMetadataUpdate = Pick<
+  CatalogManifest["component"],
+  "manufacturer" | "mpn" | "library_name" | "title" | "description" | "package" | "datasheet"
+>;
 
 type GitHubError = {
   message?: string;
@@ -275,6 +280,40 @@ export async function moveCatalogComponent(
     body: JSON.stringify({ sha: commit.sha, force: false }),
   });
   return { sha: commit.sha, shortSha: commit.sha.slice(0, 7), url: commit.html_url };
+}
+
+export async function updateCatalogComponentMetadata(
+  config: GitHubConfig,
+  component: CatalogComponent,
+  values: CatalogMetadataUpdate,
+) {
+  const manifest = structuredClone(component.manifest);
+  manifest.component = {
+    ...manifest.component,
+    manufacturer: values.manufacturer.trim(),
+    mpn: values.mpn.trim(),
+    library_name: values.library_name.trim(),
+    title: sanitizeCatalogTitle(values.title || ""),
+    description: values.description.trim(),
+    package: values.package.trim(),
+    datasheet: values.datasheet.trim(),
+  };
+  if (!manifest.component.library_name || !manifest.component.mpn) {
+    throw new Error("KiCad name and manufacturer part number are required.");
+  }
+  return commitPackage(
+    config,
+    [{
+      id: `edit-${component.manifestPath}`,
+      kind: "metadata",
+      inputName: component.manifestPath,
+      outputPath: component.manifestPath,
+      bytes: textEncoder.encode(`${JSON.stringify(manifest, null, 2)}\n`),
+      strategy: "replace",
+      notes: ["Catalog metadata edit"],
+    }],
+    `Update ${manifest.component.library_name} catalog details`,
+  );
 }
 
 async function consolidateFiles(config: GitHubConfig, files: NormalizedAsset[]) {

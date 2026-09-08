@@ -1,5 +1,6 @@
 import { unzipSync } from "fflate";
 import { sniffModelExtension } from "./file-format.ts";
+import { sanitizeCatalogTitle } from "./categories.ts";
 
 export type AssetKind =
   | "symbol"
@@ -29,7 +30,6 @@ export type PartMetadata = {
   category: string;
   datasheet: string;
   description: string;
-  verified: "Unverified" | "Datasheet checked" | "Fabricated" | "Electrically tested";
   sourceUrl: string;
   primaryFootprintId?: string;
 };
@@ -416,7 +416,6 @@ function renameSymbolBlock(
     ["Manufacturer", metadata.manufacturer],
     ["MPN", metadata.mpn],
     ["Source", metadata.sourceUrl],
-    ["Verified", metadata.verified],
   ];
   for (const [name, value] of properties) {
     if (value) result = replaceProperty(result, name, value);
@@ -654,9 +653,6 @@ export async function normalizeAssets(
   if (!symbols.length) warnings.push("No modern symbol file is included.");
   if (!footprints.length) warnings.push("No footprint file is included.");
   if (!models.length) warnings.push("No 3D model is included.");
-  if (metadata.verified === "Unverified") {
-    warnings.push("This import is marked Unverified; check pin numbering and pad dimensions before production use.");
-  }
 
   const replacePaths = normalized
     .filter((file) => file.strategy === "replace")
@@ -679,7 +675,7 @@ export async function normalizeAssets(
       manufacturer: metadata.manufacturer,
       mpn: metadata.mpn,
       library_name: metadata.libraryName,
-      title: metadata.title,
+      title: sanitizeCatalogTitle(metadata.title),
       description: metadata.description,
       package: metadata.packageName,
       datasheet: metadata.datasheet,
@@ -689,7 +685,6 @@ export async function normalizeAssets(
       symbol: symbols.length ? `${category}:${partName}` : null,
       footprints: footprintNames.map((name) => `${category}:${name}`),
       default_footprint: primaryFootprint || null,
-      verified: metadata.verified,
     },
     provenance: {
       source_url: metadata.sourceUrl,

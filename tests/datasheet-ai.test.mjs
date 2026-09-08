@@ -47,6 +47,7 @@ test("uploads a temporary PDF blob and returns editable catalog text", async () 
           kind: "suggestion",
           title: "800–980 MHz voltage-controlled oscillator",
           description: "Coaxial VCO covering 800–980 MHz with low phase noise.",
+          category: "CG_Oscillators",
         })),
       }));
     }
@@ -62,6 +63,7 @@ test("uploads a temporary PDF blob and returns editable catalog text", async () 
     });
     assert.equal(suggestion.title, "800–980 MHz voltage-controlled oscillator");
     assert.match(suggestion.description, /VCO/);
+    assert.equal(suggestion.category, "CG_Oscillators");
   } finally {
     globalThis.setTimeout = originalTimeout;
   }

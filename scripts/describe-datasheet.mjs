@@ -7,6 +7,7 @@ const filename = (process.env.INPUT_FILENAME || "datasheet.pdf").slice(0, 120);
 const manufacturer = (process.env.INPUT_MANUFACTURER || "").slice(0, 120);
 const mpn = (process.env.INPUT_MPN || "").slice(0, 120);
 const lcscId = (process.env.INPUT_LCSC_ID || "").slice(0, 32);
+const categoryOptionsRaw = process.env.INPUT_CATEGORY_OPTIONS || "[]";
 const repository = process.env.GITHUB_REPOSITORY || "";
 const githubToken = process.env.GITHUB_TOKEN || "";
 const openAiKey = process.env.OPENAI_API_KEY || "";
@@ -17,6 +18,10 @@ async function describe() {
   if (!/^[0-9a-f]{40}$/i.test(blobSha)) throw new Error("Invalid datasheet reference.");
   if (!repository || !githubToken) throw new Error("The workflow cannot read the temporary datasheet.");
   if (!openAiKey) throw new Error("Add an OPENAI_API_KEY repository secret before using AI descriptions.");
+  const categoryOptions = JSON.parse(categoryOptionsRaw);
+  if (!Array.isArray(categoryOptions) || !categoryOptions.length || categoryOptions.some((item) => !item?.id || !item?.label)) {
+    throw new Error("No valid component categories were supplied.");
+  }
 
   const blobResponse = await fetch(`https://api.github.com/repos/${repository}/git/blobs/${blobSha}`, {
     headers: {
@@ -42,7 +47,7 @@ async function describe() {
         content: [
           {
             type: "input_text",
-            text: `Read this electronic-component datasheet. Return a concise functional title and a one-sentence technical description for a KiCad component catalog.\n\nKnown identifiers:\nManufacturer: ${manufacturer || "unknown"}\nMPN: ${mpn || "unknown"}\nLCSC ID: ${lcscId || "unknown"}\n\nThe title must be a plain technical noun phrase, no more than 80 characters, and should identify what the part does rather than repeat the part number. The description must be no more than 240 characters and include the main function and the most useful differentiating specifications. Use only facts supported by the datasheet. Do not include marketing language.`,
+            text: `Read this electronic-component datasheet. Return a concise functional title, a one-sentence technical description, and the best matching category for a KiCad component catalog.\n\nKnown identifiers:\nManufacturer: ${manufacturer || "unknown"}\nMPN: ${mpn || "unknown"}\nLCSC ID: ${lcscId || "unknown"}\n\nAllowed categories (return the id):\n${categoryOptions.map((item) => `${item.id}: ${item.label}`).join("\n")}\n\nThe title must be a plain English technical noun phrase, no more than 80 characters, and should identify what the part does rather than repeat the part number. Do not use Chinese or Japanese characters in the title. The description must be no more than 240 characters and include the main function and the most useful differentiating specifications. Use only facts supported by the datasheet. Do not include marketing language.`,
           },
           { type: "input_file", filename, file_data: `data:application/pdf;base64,${base64}` },
         ],
@@ -57,8 +62,9 @@ async function describe() {
             properties: {
               title: { type: "string", minLength: 3, maxLength: 80 },
               description: { type: "string", minLength: 10, maxLength: 240 },
+              category: { type: "string", enum: categoryOptions.map((item) => item.id) },
             },
-            required: ["title", "description"],
+            required: ["title", "description", "category"],
             additionalProperties: false,
           },
         },
@@ -77,7 +83,17 @@ async function describe() {
     .find((item) => item.type === "output_text")?.text;
   if (!outputText) throw new Error("OpenAI did not return a title and description.");
   const suggestion = JSON.parse(outputText);
-  return { kind: "suggestion", title: suggestion.title.trim(), description: suggestion.description.trim() };
+  const title = suggestion.title
+    .replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (title.length < 3) throw new Error("OpenAI did not return a usable English title.");
+  return {
+    kind: "suggestion",
+    title,
+    description: suggestion.description.trim(),
+    category: suggestion.category,
+  };
 }
 
 await mkdir(outputDir, { recursive: true });

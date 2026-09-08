@@ -1,12 +1,14 @@
 import { unzipSync } from "fflate";
+import { libraryCategories } from "@/lib/categories";
 
 type DescriptionResult =
-  | { kind: "suggestion"; title: string; description: string }
+  | { kind: "suggestion"; title: string; description: string; category: string }
   | { kind: "error"; message: string };
 
 export type DatasheetSuggestion = {
   title: string;
   description: string;
+  category: string;
 };
 
 const api = "https://api.github.com/repos/chrisg20/kicad-library-intake";
@@ -76,6 +78,7 @@ export async function describeDatasheetWithActions(
         manufacturer: input.manufacturer.slice(0, 120),
         mpn: input.mpn.slice(0, 120),
         lcsc_id: input.lcscId.slice(0, 32),
+        category_options: JSON.stringify(libraryCategories),
       },
     }),
   });
@@ -102,5 +105,8 @@ export async function describeDatasheetWithActions(
   if (!resultBytes) throw new Error("The datasheet description returned an invalid result.");
   const result = JSON.parse(textDecoder.decode(resultBytes)) as DescriptionResult;
   if (result.kind === "error") throw new Error(result.message);
-  return { title: result.title, description: result.description };
+  if (!libraryCategories.some((category) => category.id === result.category)) {
+    throw new Error("OpenAI returned an unknown component category.");
+  }
+  return { title: result.title, description: result.description, category: result.category };
 }

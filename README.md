@@ -10,7 +10,7 @@ A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC compo
 3D CAD tessellation uses [occt-import-js](https://github.com/kovacsv/occt-import-js) (LGPL-2.1) and OpenCascade, with Three.js rendering. The unmodified runtime, WASM and license are copied from the locked npm package during builds. CAD processing stays local in a cancellable worker; no model is uploaded for preview. Curve-only IGES files cannot produce solid surfaces.
 - accepts an LCSC `C` ID and converts it into an importable KiCad bundle with [easyeda2kicad 1.0.1](https://github.com/uPesy/easyeda2kicad.py/tree/fff10a38619963d7cb1c57d779655a9ea4572e95) (AGPL-3.0), including symbol, footprint, STEP, and WRL files
 - fills manufacturer, MPN, package, and available metadata from the converted LCSC component
-- accepts an optional PDF datasheet on the LCSC path, archives it with the component, and can use OpenAI to suggest an editable functional title and technical description
+- accepts an optional PDF datasheet on the LCSC path, archives it with the component, and can use OpenAI to suggest an editable English functional title, technical description, and one of the 40 library categories
 - autocompletes manually entered manufacturers from component manifests already stored in the connected library
 - keeps multiple footprint variants with collision-safe names, a selectable symbol default, and explicit per-footprint model assignments
 - separates the human-facing library name (for example `ADL5606`) from the exact orderable MPN (`ADL5606ARKZ-R7`)
@@ -19,6 +19,7 @@ A GitHub Pages intake console for turning uploaded KiCad assets or an LCSC compo
 - merges symbols into the selected category library rather than replacing the whole `.kicad_sym` file
 - creates one atomic GitHub commit through the Git Data REST API
 - writes a SHA-256 provenance manifest for every imported component
+- provides catalog meatball actions for editing component metadata or moving the complete component between library sections
 
 ## GitHub token permissions
 
@@ -114,7 +115,6 @@ Manual uploads, ZIP extraction, KiCad processing, review, and GitHub commits hap
 - browser uploads are capped at 40 MB each
 - ZIPs are capped at 200 entries and 80 MB expanded
 - legacy `.lib/.dcm` files are identified but blocked from normalization; convert them to `.kicad_sym` in KiCad first
-- unverified parts receive a visible warning and `Verified: Unverified` metadata
 
 ## Development
 

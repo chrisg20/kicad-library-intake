@@ -50,7 +50,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toaster } from "@/components/ui/sonner";
-import { libraryCategories } from "@/lib/categories";
+import { displayCategory, libraryCategories } from "@/lib/categories";
 import { describeDatasheetWithActions } from "@/lib/datasheet-ai";
 import { convertLcscWithActions, normalizeLcscId } from "@/lib/lcsc-actions";
 import {
@@ -83,7 +83,6 @@ const defaultMetadata: PartMetadata = {
   category: "CG_RF_Amplifiers",
   datasheet: "",
   description: "",
-  verified: "Unverified",
   sourceUrl: "",
 };
 
@@ -361,10 +360,11 @@ export default function Home() {
         ...current,
         title: suggestion.title,
         description: suggestion.description,
+        category: suggestion.category,
       }));
       setNormalized(null);
       setCommitResult(null);
-      toast.success("Title and description generated; review them before committing");
+      toast.success("Title, description, and category generated; review them before committing");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The datasheet text could not be generated.");
     } finally {
@@ -680,7 +680,7 @@ export default function Home() {
                           </Button>
                           <Button type="button" onClick={() => void generateDatasheetText()} disabled={!lcscDatasheet || datasheetAiBusy} className="bg-slate-100 text-slate-950 hover:bg-white">
                             {datasheetAiBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
-                            Suggest text
+                            Suggest metadata
                           </Button>
                         </div>
                       </div>
@@ -691,7 +691,7 @@ export default function Home() {
                         className="hidden"
                         onChange={(event) => { void addLcscDatasheet(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }}
                       />
-                      <p className="mt-3 text-xs leading-5 text-slate-500">OpenAI reads the PDF through the private Actions workflow and suggests editable catalog fields. The PDF is also included with the component.</p>
+                      <p className="mt-3 text-xs leading-5 text-slate-500">OpenAI reads the PDF through the private Actions workflow and suggests an editable English title, description, and category. The PDF is also included with the component.</p>
                     </div>
                   </div>
                 )}
@@ -795,7 +795,7 @@ export default function Home() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-semibold text-slate-100">{normalized.componentName}</h3>
-                        <Badge variant="secondary" className="bg-slate-800 text-slate-300">{metadata.category}</Badge>
+                        <Badge variant="secondary" className="bg-slate-800 text-slate-300">{displayCategory(metadata.category)}</Badge>
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 font-mono text-xs text-slate-500">
                         <span>{targetSummary.length} repository files</span>
@@ -962,34 +962,18 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                  <div>
-                    <FieldLabel>Library category</FieldLabel>
-                    <Select value={metadata.category} onValueChange={(value) => updateMetadata("category", value)}>
-                      <SelectTrigger className="h-10 w-full border-slate-700 bg-slate-950/70 text-slate-100">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
-                        {libraryCategories.map((category) => (
-                          <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <FieldLabel>Verification state</FieldLabel>
-                    <Select value={metadata.verified} onValueChange={(value) => updateMetadata("verified", value as PartMetadata["verified"])}>
-                      <SelectTrigger className="h-10 w-full border-slate-700 bg-slate-950/70 text-slate-100">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
-                        <SelectItem value="Unverified">Unverified</SelectItem>
-                        <SelectItem value="Datasheet checked">Datasheet checked</SelectItem>
-                        <SelectItem value="Fabricated">Fabricated</SelectItem>
-                        <SelectItem value="Electrically tested">Electrically tested</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div>
+                  <FieldLabel>Library category</FieldLabel>
+                  <Select value={metadata.category} onValueChange={(value) => updateMetadata("category", value)}>
+                    <SelectTrigger className="h-10 w-full border-slate-700 bg-slate-950/70 text-slate-100">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
+                      {libraryCategories.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>{category.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="rounded-xl border border-slate-800 bg-slate-950/45 p-4">

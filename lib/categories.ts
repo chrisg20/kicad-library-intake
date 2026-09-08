@@ -49,3 +49,10 @@ export function displayCategory(category: string) {
   return categoryLabels.get(category)
     ?? category.replace(/^CG_/, "").replaceAll("_", " ");
 }
+
+export function sanitizeCatalogTitle(title: string) {
+  return title
+    .replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
