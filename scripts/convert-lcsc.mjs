@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const lcscId = (process.env.INPUT_LCSC_ID || "").trim().toUpperCase();
@@ -14,6 +14,42 @@ function run(command, args, options = {}) {
   });
 }
 
+async function filesUnder(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await filesUnder(entryPath));
+    else files.push(entryPath);
+  }
+  return files;
+}
+
+function datasheetUrlFromSymbol(source) {
+  const match = source.match(/\(property\s+"Datasheet"\s+"((?:\\.|[^"\\])*)"/i);
+  if (!match) return "";
+  return match[1].replace(/\\([\\"])/g, "$1").trim();
+}
+
+async function addDatasheet(stage) {
+  const symbolPath = (await filesUnder(stage)).find((file) => file.toLowerCase().endsWith(".kicad_sym"));
+  if (!symbolPath) return false;
+  const datasheetUrl = datasheetUrlFromSymbol(await readFile(symbolPath, "utf8"));
+  if (!/^https:\/\//i.test(datasheetUrl)) return false;
+
+  const response = await fetch(datasheetUrl, {
+    redirect: "follow",
+    headers: { "User-Agent": "kicad-library-intake/1.0" },
+  });
+  if (!response.ok) return false;
+  const declaredSize = Number(response.headers.get("content-length") || 0);
+  if (declaredSize > 40 * 1024 * 1024) return false;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length > 40 * 1024 * 1024 || new TextDecoder().decode(bytes.subarray(0, 5)) !== "%PDF-") return false;
+  await writeFile(path.join(stage, `LCSC_${lcscId}_datasheet.pdf`), bytes);
+  return true;
+}
+
 async function convert() {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Invalid request ID.");
   if (!/^C\d+$/.test(lcscId)) throw new Error("Invalid LCSC component ID.");
@@ -22,6 +58,7 @@ async function convert() {
   const outputBase = path.join(stage, `LCSC_${lcscId}`);
   await mkdir(stage, { recursive: true });
   await run("easyeda2kicad", ["--full", `--lcsc_id=${lcscId}`, "--output", outputBase]);
+  await addDatasheet(stage);
 
   const filename = `LCSC_${lcscId}_easyeda2kicad.zip`;
   const assetPath = path.posix.join("asset", filename);

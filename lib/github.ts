@@ -328,7 +328,7 @@ export async function updateCatalogComponentMetadata(
   const manifest = structuredClone(component.manifest);
   manifest.component = {
     ...manifest.component,
-    manufacturer: values.manufacturer.trim(),
+    manufacturer: sanitizeCatalogTitle(values.manufacturer),
     mpn: values.mpn.trim(),
     library_name: values.library_name.trim(),
     title: sanitizeCatalogTitle(values.title || ""),

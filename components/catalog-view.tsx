@@ -303,7 +303,7 @@ export function CatalogView(props: Props) {
                             <td className="px-5 py-5">
                               <div className="text-sm font-semibold text-teal-200">{displayTitle}</div>
                               {displayTitle !== displayLibraryName && <div className="mt-1 font-mono text-xs text-slate-500">{displayLibraryName}</div>}
-                              <div className="mt-1 text-sm text-slate-400">{manifest.component.manufacturer || "Unknown manufacturer"}</div>
+                              <div className="mt-1 text-sm text-slate-400">{sanitizeCatalogTitle(manifest.component.manufacturer || "") || "Unknown manufacturer"}</div>
                               <div className="mt-1 font-mono text-xs text-slate-600">{manifest.component.mpn}</div>
                               {manifest.provenance.source_url && <a href={manifest.provenance.source_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs text-slate-500 hover:text-teal-300">Source <ExternalLink className="size-3" /></a>}
                             </td>
@@ -350,7 +350,7 @@ export function CatalogView(props: Props) {
           </DialogHeader>
           <div className="grid gap-4 py-2 sm:grid-cols-2">
             <label className="grid gap-2 text-sm text-slate-300">Manufacturer
-              <Input value={editValues.manufacturer} onChange={(event) => setEditValues((current) => ({ ...current, manufacturer: event.target.value }))} className="border-slate-700 bg-slate-950/70" />
+              <Input value={editValues.manufacturer} onChange={(event) => setEditValues((current) => ({ ...current, manufacturer: sanitizeCatalogTitle(event.target.value) }))} className="border-slate-700 bg-slate-950/70" />
             </label>
             <label className="grid gap-2 text-sm text-slate-300">Manufacturer part number
               <Input value={editValues.mpn} onChange={(event) => setEditValues((current) => ({ ...current, mpn: event.target.value }))} className="border-slate-700 bg-slate-950/70 font-mono" />

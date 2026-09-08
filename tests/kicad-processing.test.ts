@@ -4,6 +4,7 @@ import { zipSync } from "fflate";
 import {
   acceptedFileTypes,
   classifyAsset,
+  inferMetadataFromAssets,
   ingestBrowserFiles,
   mergeKicadSymbolLibraries,
   normalizeAssets,
@@ -106,6 +107,10 @@ assert.ok(libraryCategories.every(({ id, label }) => id.startsWith("CG_") && !la
 assert.equal(displayCategory("CG_RF_Filters_Passives"), "RF Filters & Passives");
 assert.equal(sanitizeCatalogTitle("低噪声 Low-noise 発振器 oscillator"), "Low-noise oscillator");
 assert.equal(sanitizeCatalogTitle("低噪声発振器"), "");
+const localizedManufacturer = inferMetadataFromAssets([
+  { ...assets[0], bytes: encoder.encode(sourceSymbol.replace('(property "Value" "OLD_PART"', '(property "Manufacturer" "立创商城 LCSC Electronics")\n    (property "Value" "OLD_PART"')) },
+]);
+assert.equal(localizedManufacturer.manufacturer, "LCSC Electronics");
 
 const result = await normalizeAssets(assets, metadata);
 const resultWithDatasheet = await normalizeAssets([

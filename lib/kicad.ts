@@ -215,7 +215,7 @@ export function inferMetadataFromAssets(assets: IntakeAsset[]): Partial<PartMeta
     const value = propertyValue(source, "Value");
     result.mpn = propertyValue(source, "MPN") || value || symbolName;
     result.libraryName = value || symbolName || result.mpn;
-    result.manufacturer = propertyValue(source, "Manufacturer");
+    result.manufacturer = sanitizeCatalogTitle(propertyValue(source, "Manufacturer"));
     result.datasheet = propertyValue(source, "Datasheet");
     result.description = propertyValue(source, "Description");
     const footprintRef = propertyValue(source, "Footprint");

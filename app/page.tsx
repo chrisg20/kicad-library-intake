@@ -215,7 +215,7 @@ export default function Home() {
         .then((components) => {
           if (cancelled) return;
           const manufacturers = components
-            .map((component) => component.manifest.component.manufacturer?.trim())
+            .map((component) => sanitizeCatalogTitle(component.manifest.component.manufacturer || ""))
             .filter(Boolean) as string[];
           setManufacturerOptions([...new Set(manufacturers)].sort((a, b) => a.localeCompare(b)));
         })
@@ -311,7 +311,7 @@ export default function Home() {
       setMetadata((current) => ({
         ...defaultMetadata,
         category: current.category,
-        manufacturer: inferred.manufacturer || "",
+        manufacturer: sanitizeCatalogTitle(inferred.manufacturer || ""),
         mpn: inferredMpn,
         libraryName: inferredLibraryName,
         packageName: inferred.packageName || "",
@@ -351,7 +351,7 @@ export default function Home() {
       setRepoDialogOpen(true);
       return toast.error("Connect GitHub before generating datasheet text.");
     }
-    if (!lcscDatasheet) return toast.error("Upload a PDF datasheet first.");
+    if (!lcscDatasheet) return toast.error("No PDF was found automatically. Upload a datasheet first.");
     setDatasheetAiBusy(true);
     try {
       const suggestion = await describeDatasheetWithActions(token, {
@@ -677,7 +677,7 @@ export default function Home() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-200">Datasheet <span className="font-normal text-slate-500">(optional)</span></p>
-                          <p className="mt-1 truncate text-sm text-slate-500">{lcscDatasheet ? lcscDatasheet.name : "Attach the manufacturer PDF for catalog text and archival."}</p>
+                          <p className="mt-1 truncate text-sm text-slate-500">{lcscDatasheet ? `${lcscDatasheet.name} · ready for OpenAI` : "No PDF found automatically; attach one for catalog text and archival."}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
                           <Button type="button" variant="outline" onClick={() => lcscDatasheetInputRef.current?.click()} className="border-slate-700 bg-slate-950/60 text-slate-300">
@@ -696,7 +696,7 @@ export default function Home() {
                         className="hidden"
                         onChange={(event) => { void addLcscDatasheet(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }}
                       />
-                      <p className="mt-3 text-xs leading-5 text-slate-500">OpenAI reads the PDF through the private Actions workflow and suggests an editable English title, description, and category. The PDF is also included with the component.</p>
+                      <p className="mt-3 text-xs leading-5 text-slate-500">When LCSC provides a PDF, it is attached automatically and ready for OpenAI. You can replace it manually. OpenAI suggests an editable English title, description, and category.</p>
                     </div>
                   </div>
                 )}
@@ -887,7 +887,7 @@ export default function Home() {
                       id="manufacturer"
                       list="manufacturer-options"
                       value={metadata.manufacturer}
-                      onChange={(event) => updateMetadata("manufacturer", event.target.value)}
+                      onChange={(event) => updateMetadata("manufacturer", sanitizeCatalogTitle(event.target.value))}
                       placeholder="Analog Devices"
                       className="field-input"
                     />
