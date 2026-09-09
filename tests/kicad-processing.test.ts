@@ -8,6 +8,7 @@ import {
   ingestBrowserFiles,
   mergeKicadSymbolLibraries,
   normalizeAssets,
+  preferSolidModels,
   type IntakeAsset,
   type PartMetadata,
 } from "../lib/kicad.ts";
@@ -148,10 +149,21 @@ assert.equal(classifyAsset("download", encoder.encode("IGES test".padEnd(72) + "
 const extracted = await ingestBrowserFiles([new File([zipSync({
   "models/part.IGES": encoder.encode("IGES test".padEnd(72) + "S      1\n"),
   "models/download": encoder.encode("IGES test".padEnd(72) + "S      1\n"),
+  "models/part.wrl": encoder.encode("#VRML V2.0 utf8\n"),
   "hand/part.kicad_mod": encoder.encode(sourceFootprint),
   "reflow/part.kicad_mod": encoder.encode(sourceFootprint),
 })], "part.zip")]);
 assert.equal(extracted.filter((asset) => asset.kind === "model").length, 2);
+assert.equal(extracted.some((asset) => asset.name === "part.wrl"), false);
+assert.equal(preferSolidModels([
+  { ...assets[2], id: "solid", name: "housing.step" },
+  { ...assets[2], id: "vrml", name: "housing.wrl" },
+  { ...assets[2], id: "other-vrml", name: "connector.wrl" },
+]).some((asset) => asset.name === "housing.wrl"), false);
+assert.equal(preferSolidModels([
+  { ...assets[2], id: "solid", name: "housing.step" },
+  { ...assets[2], id: "other-vrml", name: "connector.wrl" },
+]).some((asset) => asset.name === "connector.wrl"), true);
 assert.equal(extracted.filter((asset) => asset.kind === "footprint").length, 2);
 assert.equal(extracted.find((asset) => asset.sourceName.endsWith("models/download"))?.name, "download.igs");
 assert.equal(result.symbolName, "ADL5606");

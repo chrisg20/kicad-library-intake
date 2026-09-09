@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Box, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
@@ -146,6 +146,31 @@ export function CatalogView(props: Props) {
     [selectedSection, visible],
   );
 
+  useEffect(() => {
+    if (!props.repositoryInfo) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setLoading(true);
+      const { owner, repo } = parseRepository(props.repositoryInput);
+      void listCatalogComponents({ owner, repo, branch: props.repositoryInfo!.branch || props.branch, token: props.token })
+        .then((result) => {
+          if (cancelled) return;
+          setComponents(result);
+          const available = [...new Set(result.map((item) => item.manifest.library.category))];
+          setSelectedSection((current) => available.includes(current) ? current : (available[0] ?? ""));
+          setLoaded(true);
+        })
+        .catch((error) => {
+          if (!cancelled) toast.error(error instanceof Error ? error.message : "The catalog could not be loaded.");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    });
+    return () => { cancelled = true; };
+  }, [props.branch, props.repositoryInfo, props.repositoryInput, props.token]);
+
   async function refresh() {
     if (!props.repositoryInfo) return props.onConnect();
     setLoading(true);
@@ -244,7 +269,7 @@ export function CatalogView(props: Props) {
             <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-500" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, MPN, package…" className="h-10 border-slate-700 bg-slate-950/70 pl-9" />
           </div>
-          <Button onClick={refresh} disabled={loading} variant="outline" className="border-slate-700 bg-slate-900/70">
+          <Button onClick={() => void refresh()} disabled={loading} variant="outline" className="border-slate-700 bg-slate-900/70">
             <RefreshCw className={loading ? "animate-spin" : ""} /> {loaded ? "Refresh" : "Load catalog"}
           </Button>
         </div>

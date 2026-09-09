@@ -165,7 +165,20 @@ export async function ingestBrowserFiles(files: File[]): Promise<IntakeAsset[]> 
       }
     }
   }
-  return assets;
+  return preferSolidModels(assets);
+}
+
+export function preferSolidModels(assets: IntakeAsset[]) {
+  const solidModelStems = new Set(
+    assets
+      .filter((asset) => asset.kind === "model" && [".step", ".stp", ".iges", ".igs"].includes(extension(asset.name)))
+      .map((asset) => basename(asset.name).replace(/\.(?:step|stp|iges|igs)$/i, "").toLowerCase()),
+  );
+  return assets.filter((asset) => {
+    if (asset.kind !== "model" || extension(asset.name) !== ".wrl") return true;
+    const stem = basename(asset.name).replace(/\.wrl$/i, "").toLowerCase();
+    return !solidModelStems.has(stem);
+  });
 }
 
 export function basename(path: string) {

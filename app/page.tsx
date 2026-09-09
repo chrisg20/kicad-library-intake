@@ -67,6 +67,7 @@ import {
   inferMetadataFromAssets,
   ingestBrowserFiles,
   normalizeAssets,
+  preferSolidModels,
   sanitizeKiCadName,
   type AssetKind,
   type IntakeAsset,
@@ -234,7 +235,7 @@ export default function Home() {
   const commitMessage = `Add ${metadata.libraryName || metadata.mpn || "component"} KiCad library assets`;
   const previewLibraryName = sanitizeKiCadName(metadata.libraryName, "Part_Name");
   const previewPackageName = sanitizeKiCadName(metadata.packageName, "Package");
-  const lcscDatasheet = assets.find((asset) => asset.kind === "datasheet");
+  const datasheetAsset = assets.find((asset) => asset.kind === "datasheet");
 
   const targetSummary = useMemo(() => {
     if (!normalized) return [];
@@ -251,23 +252,24 @@ export default function Home() {
     if (!files.length) return;
     try {
       const incoming = await ingestBrowserFiles(files);
-      setAssets((current) => {
-        const combined = [...current, ...incoming];
-        const inferred = inferMetadataFromAssets(combined);
-        setMetadata((previous) => ({
-          ...previous,
-          manufacturer: previous.manufacturer || inferred.manufacturer || "",
-          mpn: previous.mpn || inferred.mpn || "",
-          libraryName: previous.libraryName || inferred.libraryName || "",
-          packageName: previous.packageName || inferred.packageName || "",
-          datasheet: previous.datasheet || inferred.datasheet || "",
-          description: previous.description || inferred.description || "",
-        }));
-        return combined;
-      });
+      const combined = preferSolidModels([...assets, ...incoming]);
+      const inferred = inferMetadataFromAssets(combined);
+      const nextMetadata: PartMetadata = {
+        ...metadata,
+        manufacturer: metadata.manufacturer || inferred.manufacturer || "",
+        mpn: metadata.mpn || inferred.mpn || "",
+        libraryName: metadata.libraryName || inferred.libraryName || "",
+        packageName: metadata.packageName || inferred.packageName || "",
+        datasheet: metadata.datasheet || inferred.datasheet || "",
+        description: metadata.description || inferred.description || "",
+      };
+      setAssets(combined);
+      setMetadata(nextMetadata);
       setNormalized(null);
       setCommitResult(null);
       toast.success(`${incoming.length} asset${incoming.length === 1 ? "" : "s"} added`);
+      const datasheet = incoming.find((asset) => asset.kind === "datasheet");
+      if (datasheet) void generateDatasheetText(datasheet, nextMetadata, "");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Those files could not be read.");
     }
@@ -302,15 +304,15 @@ export default function Home() {
         sanitizeCatalogTitle(inferred.libraryName || ""),
         sanitizeKiCadName(inferredMpn, normalizedId),
       );
-      setAssets((current) => [
+      const nextAssets = [
         ...incoming.filter((asset) => asset.kind !== "datasheet"),
         ...(incoming.some((asset) => asset.kind === "datasheet")
           ? incoming.filter((asset) => asset.kind === "datasheet")
-          : current.filter((asset) => asset.kind === "datasheet")),
-      ]);
-      setMetadata((current) => ({
+          : assets.filter((asset) => asset.kind === "datasheet")),
+      ];
+      const nextMetadata: PartMetadata = {
         ...defaultMetadata,
-        category: current.category,
+        category: metadata.category,
         manufacturer: sanitizeManufacturerName(inferred.manufacturer || ""),
         mpn: inferredMpn,
         libraryName: inferredLibraryName,
@@ -319,10 +321,14 @@ export default function Home() {
         description: inferred.description || "",
         datasheet: inferred.datasheet || "",
         sourceUrl: file.sourceUrl,
-      }));
+      };
+      setAssets(nextAssets);
+      setMetadata(nextMetadata);
       setNormalized(null);
       setCommitResult(null);
       toast.success(`${normalizedId} converted and component details filled in`);
+      const datasheet = nextAssets.find((asset) => asset.kind === "datasheet");
+      if (datasheet) void generateDatasheetText(datasheet, nextMetadata, normalizedId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The LCSC component could not be converted.");
     } finally {
@@ -341,25 +347,30 @@ export default function Home() {
       setNormalized(null);
       setCommitResult(null);
       toast.success("Datasheet attached");
+      void generateDatasheetText(datasheet, metadata, sourceMode === "lcsc" ? lcscId : "");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "The datasheet could not be read.");
     }
   }
 
-  async function generateDatasheetText() {
+  async function generateDatasheetText(
+    selectedDatasheet: IntakeAsset | undefined = datasheetAsset,
+    knownMetadata: PartMetadata = metadata,
+    knownLcscId = sourceMode === "lcsc" ? lcscId : "",
+  ) {
     if (!repositoryInfo) {
       setRepoDialogOpen(true);
       return toast.error("Connect GitHub before generating datasheet text.");
     }
-    if (!lcscDatasheet) return toast.error("No PDF was found automatically. Upload a datasheet first.");
+    if (!selectedDatasheet) return toast.error("Attach a PDF datasheet first.");
     setDatasheetAiBusy(true);
     try {
       const suggestion = await describeDatasheetWithActions(token, {
-        bytes: lcscDatasheet.bytes,
-        filename: lcscDatasheet.name,
-        manufacturer: metadata.manufacturer,
-        mpn: metadata.mpn,
-        lcscId: lcscId.trim().toUpperCase(),
+        bytes: selectedDatasheet.bytes,
+        filename: selectedDatasheet.name,
+        manufacturer: knownMetadata.manufacturer,
+        mpn: knownMetadata.mpn,
+        lcscId: knownLcscId.trim().toUpperCase(),
       });
       setMetadata((current) => ({
         ...current,
@@ -677,13 +688,13 @@ export default function Home() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-200">Datasheet <span className="font-normal text-slate-500">(optional)</span></p>
-                          <p className="mt-1 truncate text-sm text-slate-500">{lcscDatasheet ? `${lcscDatasheet.name} · ready for OpenAI` : "No PDF found automatically; attach one for catalog text and archival."}</p>
+                          <p className="mt-1 truncate text-sm text-slate-500">{datasheetAsset ? `${datasheetAsset.name} · ${datasheetAiBusy ? "extracting metadata…" : "ready for OpenAI"}` : "No PDF found automatically; attach one for catalog text and archival."}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
                           <Button type="button" variant="outline" onClick={() => lcscDatasheetInputRef.current?.click()} className="border-slate-700 bg-slate-950/60 text-slate-300">
-                            <FileText /> {lcscDatasheet ? "Replace PDF" : "Upload PDF"}
+                            <FileText /> {datasheetAsset ? "Replace PDF" : "Upload PDF"}
                           </Button>
-                          <Button type="button" onClick={() => void generateDatasheetText()} disabled={!lcscDatasheet || datasheetAiBusy} className="bg-slate-100 text-slate-950 hover:bg-white">
+                          <Button type="button" onClick={() => void generateDatasheetText()} disabled={!datasheetAsset || datasheetAiBusy} className="bg-slate-100 text-slate-950 hover:bg-white">
                             {datasheetAiBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
                             Suggest metadata
                           </Button>
@@ -732,6 +743,21 @@ export default function Home() {
                         </Button>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {sourceMode === "upload" && datasheetAsset && (
+                  <div className="mt-5 flex flex-col gap-3 rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-200">OpenAI metadata</p>
+                      <p className="mt-1 truncate text-sm text-slate-500">
+                        {datasheetAiBusy ? `Reading ${datasheetAsset.name}…` : `${datasheetAsset.name} is ready; extraction starts automatically on upload.`}
+                      </p>
+                    </div>
+                    <Button type="button" onClick={() => void generateDatasheetText()} disabled={datasheetAiBusy} className="shrink-0 bg-slate-100 text-slate-950 hover:bg-white">
+                      {datasheetAiBusy ? <Loader2 className="animate-spin" /> : <WandSparkles />}
+                      {datasheetAiBusy ? "Extracting" : "Run again"}
+                    </Button>
                   </div>
                 )}
 
