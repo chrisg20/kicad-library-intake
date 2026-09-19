@@ -783,7 +783,7 @@ export default function Home() {
                         <Select value={asset.modelAssetId ?? "auto"} onValueChange={(value) => updateFootprint(asset.id, { modelAssetId: value === "auto" ? undefined : value ?? "none" })}>
                           <SelectTrigger id={`model-${asset.id}`} className="w-full"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="auto">Automatic (only when one model is included)</SelectItem>
+                            <SelectItem value="auto">Automatic (source association or single model)</SelectItem>
                             <SelectItem value="none">No imported model</SelectItem>
                             {assets.filter((a) => a.kind === "model").map((a) => <SelectItem key={a.id} value={a.id}>{a.sourceName}</SelectItem>)}
                           </SelectContent>
@@ -842,6 +842,32 @@ export default function Home() {
                       <Progress value={normalized.completeness} className="h-1.5 bg-slate-800 [&_[data-slot=progress-indicator]]:bg-teal-300" />
                     </div>
                   </div>
+
+                  {normalized.modelLinks.length > 0 && (
+                    <div className="grid gap-3 border-b border-slate-800 bg-slate-950/20 p-5 sm:p-6">
+                      <div className="text-xs font-mono uppercase tracking-[0.12em] text-slate-600">Footprint 3D links</div>
+                      {normalized.modelLinks.map((link) => {
+                        const healthy = link.status === "linked" || link.status === "repaired";
+                        return (
+                          <div key={link.footprintPath} className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)_auto] lg:items-center">
+                            <div>
+                              <div className="text-xs text-slate-600">3D Model</div>
+                              <div className="mt-1 break-all text-sm font-medium text-slate-200">{link.modelName ?? "None"}</div>
+                              <div className="mt-1 break-all font-mono text-[11px] text-slate-600">{link.footprintName}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs text-slate-600">KiCad path</div>
+                              <div className="mt-1 break-all font-mono text-xs text-slate-300">{link.kicadPath ?? "No model path required"}</div>
+                            </div>
+                            <div className={`flex items-center gap-2 text-sm ${healthy ? "text-emerald-300" : link.status === "no-model" ? "text-slate-500" : "text-amber-300"}`}>
+                              {healthy ? <Check className="size-4" /> : link.status === "no-model" ? <CircleDotDashed className="size-4" /> : <AlertTriangle className="size-4" />}
+                              {link.message}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
 
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[720px] text-left">

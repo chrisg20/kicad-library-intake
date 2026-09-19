@@ -59,7 +59,7 @@ datasheets/
 metadata/
 ```
 
-Footprints reference models through `${MY_KICAD_LIB}` so the repository remains portable between computers. Datasheets are grouped by category and move with their component when its catalog category changes.
+Footprints reference models through `${CG_KICAD_LIB}` so the repository remains portable between computers. Configure that KiCad path variable once to point at the root of the cloned Git library. Datasheets are grouped by category and move with their component when its catalog category changes.
 
 ## Naming rules
 
@@ -78,7 +78,7 @@ the package becomes:
 ```text
 CG_RF_Amplifiers:ADL5606
 CG_RF_Amplifiers:ADL5606_SOT-89-3
-${MY_KICAD_LIB}/3dmodels/CG_RF_Amplifiers.3dshapes/ADL5606_SOT-89-3.step
+${CG_KICAD_LIB}/3dmodels/CG_RF_Amplifiers.3dshapes/ADL5606_SOT-89-3.step
 metadata/CG_RF_Amplifiers/ADL5606.json
 ```
 

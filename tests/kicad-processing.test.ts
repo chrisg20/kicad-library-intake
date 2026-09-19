@@ -9,6 +9,9 @@ import {
   mergeKicadSymbolLibraries,
   normalizeAssets,
   preferSolidModels,
+  repairFootprintModelLink,
+  retargetFootprintModelForCategory,
+  validateFootprintModelLink,
   type IntakeAsset,
   type PartMetadata,
 } from "../lib/kicad.ts";
@@ -143,8 +146,8 @@ const namedVariants = await normalizeAssets([
   assets[2],
 ], metadata);
 assert.deepEqual(namedVariants.footprintNames, ["ADL5606_HandSolder", "ADL5606_Reflow"]);
-assert.match(decoder.decode(namedVariants.files.find((file) => file.id === "footprint")!.bytes), /MY_KICAD_LIB/);
-assert.doesNotMatch(decoder.decode(namedVariants.files.find((file) => file.id === "reflow")!.bytes), /MY_KICAD_LIB/);
+assert.match(decoder.decode(namedVariants.files.find((file) => file.id === "footprint")!.bytes), /CG_KICAD_LIB/);
+assert.doesNotMatch(decoder.decode(namedVariants.files.find((file) => file.id === "reflow")!.bytes), /CG_KICAD_LIB/);
 assert.equal(classifyAsset("download", encoder.encode("IGES test".padEnd(72) + "S      1\n")), "model");
 const extracted = await ingestBrowserFiles([new File([zipSync({
   "models/part.IGES": encoder.encode("IGES test".padEnd(72) + "S      1\n"),
@@ -184,8 +187,81 @@ const footprint = result.files.find((file) => file.kind === "footprint");
 assert(footprint);
 const rewrittenFootprint = decoder.decode(footprint.bytes);
 assert.match(rewrittenFootprint, /^\(footprint "ADL5606_SOT-89-3"/);
-assert.match(rewrittenFootprint, /\$\{MY_KICAD_LIB\}\/3dmodels\/RF\.3dshapes\/ADL5606_SOT-89-3\.step/);
+assert.match(rewrittenFootprint, /\$\{CG_KICAD_LIB\}\/3dmodels\/RF\.3dshapes\/ADL5606_SOT-89-3\.step/);
 assert.match(rewrittenFootprint, /\(generator kicad_library_intake\)/);
+
+// 1. LCSC/EasyEDA import with a STEP model links the actual downloaded asset.
+const lcscStep = await normalizeAssets([
+  { ...assets[1], id: "lcsc-footprint", sourceName: "easyeda/C329267.kicad_mod" },
+  { ...assets[2], id: "lcsc-step", name: "C329267.step", sourceName: "easyeda/C329267.step" },
+], { ...metadata, category: "CG_RF_Amplifiers" });
+const lcscFootprint = decoder.decode(lcscStep.files.find((file) => file.kind === "footprint")!.bytes);
+assert.match(lcscFootprint, /\$\{CG_KICAD_LIB\}\/3dmodels\/CG_RF_Amplifiers\.3dshapes\/ADL5606_SOT-89-3\.step/);
+assert.equal(lcscStep.modelLinks[0].status, "repaired");
+
+// 2. STEP wins over an equivalent WRL and the WRL is not retained.
+const stepAndWrl = await normalizeAssets([
+  { ...assets[1], id: "step-wrl-footprint" },
+  { ...assets[2], id: "preferred-step", name: "Package.step" },
+  { ...assets[2], id: "discarded-wrl", name: "Package.wrl", bytes: encoder.encode("#VRML V2.0 utf8") },
+], { ...metadata, category: "CG_RF_Amplifiers" });
+assert.equal(stepAndWrl.files.filter((file) => file.kind === "model").length, 1);
+assert.match(stepAndWrl.files.find((file) => file.kind === "model")!.outputPath, /\.step$/);
+
+// 3. A manual footprint and STEP upload receive the same automatic link.
+const manual = await normalizeAssets([
+  { ...assets[1], id: "manual-footprint", sourceName: "manual/connector.kicad_mod" },
+  { ...assets[2], id: "manual-step", sourceName: "manual/connector.step" },
+], { ...metadata, libraryName: "USB_C_Receptacle", packageName: "USB-C", category: "CG_Connectors" });
+assert.equal(manual.modelLinks[0].kicadPath, "${CG_KICAD_LIB}/3dmodels/CG_Connectors.3dshapes/USB_C_Receptacle_USB-C.step");
+
+// 4. Absolute and temporary paths are replaced.
+const absolute = sourceFootprint.replace("${KICAD8_3DMODEL_DIR}/Package.step", "C:\\\\Users\\\\Chris\\\\Downloads\\\\Package.step");
+const absoluteResult = repairFootprintModelLink(absolute, "3dmodels/CG_Connectors.3dshapes/USB.step", ["Package.step"]);
+assert.doesNotMatch(absoluteResult.source, /C:\\\\Users/);
+assert.match(absoluteResult.source, /\$\{CG_KICAD_LIB\}\/3dmodels\/CG_Connectors\.3dshapes\/USB\.step/);
+
+// 5. Existing non-default transforms are preserved.
+const transformed = sourceFootprint
+  .replace("(offset (xyz 0 0 0))", "(offset (xyz 1.25 -2.5 3))")
+  .replace("(scale (xyz 1 1 1))", "(scale (xyz 0.5 0.5 0.5))")
+  .replace("(rotate (xyz 0 0 0))", "(rotate (xyz 90 0 180))");
+const transformedResult = repairFootprintModelLink(transformed, "3dmodels/CG_Connectors.3dshapes/USB.step", ["Package.step"]);
+assert.match(transformedResult.source, /\(offset \(xyz 1\.25 -2\.5 3\)\)/);
+assert.match(transformedResult.source, /\(scale \(xyz 0\.5 0\.5 0\.5\)\)/);
+assert.match(transformedResult.source, /\(rotate \(xyz 90 0 180\)\)/);
+
+// 6. Moving categories retargets the portable path without changing transforms.
+const moved = retargetFootprintModelForCategory(
+  transformedResult.source,
+  ["3dmodels/CG_RF_Amplifiers.3dshapes/USB.step"],
+  "CG_RF_Amplifiers",
+);
+assert.match(moved.source, /CG_RF_Amplifiers\.3dshapes\/USB\.step/);
+assert.doesNotMatch(moved.source, /CG_Connectors\.3dshapes/);
+assert.match(moved.source, /\(rotate \(xyz 90 0 180\)\)/);
+
+// 7. Renaming after import keeps the footprint, model filename, and link synchronized.
+const renamed = await normalizeAssets([
+  { ...assets[1], id: "rename-footprint" },
+  { ...assets[2], id: "rename-model" },
+], { ...metadata, libraryName: "NEW_PART", packageName: "QFN-16", category: "CG_Interface_ICs" });
+assert.equal(renamed.footprintNames[0], "NEW_PART_QFN-16");
+assert.equal(renamed.modelLinks[0].modelName, "NEW_PART_QFN-16.step");
+assert.match(decoder.decode(renamed.files.find((file) => file.kind === "footprint")!.bytes), /NEW_PART_QFN-16\.step/);
+
+// 8. A component without a model remains valid and has no injected model block.
+const noModel = await normalizeAssets([{ ...assets[1], id: "no-model" }], { ...metadata, category: "CG_Connectors" });
+assert.equal(noModel.modelLinks[0].status, "no-model");
+assert.doesNotMatch(decoder.decode(noModel.files.find((file) => file.kind === "footprint")!.bytes), /CG_KICAD_LIB/);
+
+// 9. Reprocessing an already-correct footprint is idempotent and validates cleanly.
+const expectedRepoPath = "3dmodels/CG_Connectors.3dshapes/USB.step";
+const once = repairFootprintModelLink(sourceFootprint, expectedRepoPath, ["Package.step"]);
+const twice = repairFootprintModelLink(once.source, expectedRepoPath, ["Package.step"]);
+assert.equal(twice.source, once.source);
+assert.equal(twice.changed, false);
+assert.equal(validateFootprintModelLink(twice.source, expectedRepoPath, [expectedRepoPath], "CG_Connectors").valid, true);
 
 const existing = sourceSymbol.replaceAll("OLD_PART", "EXISTING");
 const merged = mergeKicadSymbolLibraries(existing, [rewrittenSymbol]);

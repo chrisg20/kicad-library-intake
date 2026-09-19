@@ -49,8 +49,25 @@ export type NormalizedPackage = {
   symbolName: string | null;
   footprintNames: string[];
   files: NormalizedAsset[];
+  modelLinks: FootprintModelLink[];
   warnings: string[];
   completeness: number;
+};
+
+export type FootprintModelLink = {
+  footprintName: string;
+  footprintPath: string;
+  modelName: string | null;
+  modelPath: string | null;
+  kicadPath: string | null;
+  status: "linked" | "not-linked" | "missing" | "repaired" | "no-model";
+  message: string;
+};
+
+export type FootprintModelRepair = {
+  source: string;
+  changed: boolean;
+  references: string[];
 };
 
 const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
@@ -179,6 +196,14 @@ export function preferSolidModels(assets: IntakeAsset[]) {
     const stem = basename(asset.name).replace(/\.wrl$/i, "").toLowerCase();
     return !solidModelStems.has(stem);
   });
+}
+
+function modelPreference(asset: IntakeAsset) {
+  const ext = extension(asset.name);
+  if (ext === ".step" || ext === ".stp") return 0;
+  if (ext === ".iges" || ext === ".igs") return 1;
+  if (ext === ".wrl") return 2;
+  return 3;
 }
 
 export function basename(path: string) {
@@ -459,7 +484,7 @@ function appendModelBlock(source: string, modelReference: string) {
   if (closing < 0) return source;
   const model = [
     `  (model "${escapeKiCadString(modelReference)}"`,
-    "    (at (xyz 0 0 0))",
+    "    (offset (xyz 0 0 0))",
     "    (scale (xyz 1 1 1))",
     "    (rotate (xyz 0 0 0))",
     "  )",
@@ -467,7 +492,162 @@ function appendModelBlock(source: string, modelReference: string) {
   return `${source.slice(0, closing).trimEnd()}\n${model}\n${source.slice(closing)}`;
 }
 
-function rewriteFootprint(source: string, newName: string, modelReference?: string) {
+type ModelForm = FormSpan & { pathStart: number; pathEnd: number; path: string };
+
+function modelForms(source: string): ModelForm[] {
+  return rootChildForms(source)
+    .filter((form) => form.head === "model")
+    .map((form) => {
+      let cursor = form.start + 1 + form.head.length;
+      while (/\s/.test(source[cursor] ?? "")) cursor += 1;
+      const pathStart = cursor;
+      if (source[cursor] === '"') {
+        cursor += 1;
+        let escaped = false;
+        let raw = "";
+        while (cursor < form.end) {
+          const char = source[cursor];
+          if (!escaped && char === '"') {
+            cursor += 1;
+            break;
+          }
+          raw += char;
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          cursor += 1;
+        }
+        return { ...form, pathStart, pathEnd: cursor, path: decodeQuoted(raw) };
+      }
+      while (cursor < form.end && !/[\s)]/.test(source[cursor])) cursor += 1;
+      return { ...form, pathStart, pathEnd: cursor, path: source.slice(pathStart, cursor) };
+    });
+}
+
+function modelBasename(path: string) {
+  return basename(path.replaceAll("\\", "/")).toLowerCase();
+}
+
+function isUnsafeModelPath(path: string) {
+  const normalized = path.replaceAll("\\", "/");
+  return (
+    /^(?:[a-z]:\/|\/|file:)/i.test(normalized) ||
+    /(?:^|\/)(?:tmp|temp|uploads?|var\/folders)(?:\/|$)/i.test(normalized) ||
+    /easyeda|lcsc|kicad\d*_3dmodel_dir|my_kicad_lib/i.test(normalized)
+  );
+}
+
+function repositoryPathFromKiCadModelPath(path: string) {
+  const prefix = "${CG_KICAD_LIB}/";
+  return path.startsWith(prefix) ? path.slice(prefix.length).replace(/^\/+/, "") : null;
+}
+
+export function repositoryModelPath(category: string, filename: string) {
+  return `3dmodels/${category}.3dshapes/${filename}`;
+}
+
+export function kicadModelPath(repositoryPath: string) {
+  return `\${CG_KICAD_LIB}/${repositoryPath.replace(/^\/+/, "")}`;
+}
+
+export function footprintModelReferences(source: string) {
+  return modelForms(source).map((form) => form.path);
+}
+
+/** Rewrites only complete root-level model forms, preserving the selected form's transforms. */
+export function repairFootprintModelLink(
+  source: string,
+  expectedRepositoryPath: string,
+  previousFilenames: string[] = [],
+): FootprintModelRepair {
+  const expected = kicadModelPath(expectedRepositoryPath);
+  const forms = modelForms(source);
+  const knownNames = new Set([
+    modelBasename(expected),
+    ...previousFilenames.map((name) => modelBasename(name)),
+  ]);
+  const expectedDirectory = expectedRepositoryPath.slice(0, expectedRepositoryPath.lastIndexOf("/") + 1);
+  const selected = forms.find((form) => form.path === expected)
+    ?? forms.find((form) => knownNames.has(modelBasename(form.path)))
+    ?? forms.find((form) => isUnsafeModelPath(form.path))
+    ?? forms[0];
+
+  if (!selected) {
+    const rewritten = appendModelBlock(source, expected);
+    return { source: rewritten, changed: rewritten !== source, references: footprintModelReferences(rewritten) };
+  }
+
+  const replacements = forms.flatMap((form) => {
+    if (form.start === selected.start) {
+      return [{ start: form.pathStart, end: form.pathEnd, value: `"${escapeKiCadString(expected)}"` }];
+    }
+    const currentRepositoryPath = repositoryPathFromKiCadModelPath(form.path);
+    const staleCategory = currentRepositoryPath?.startsWith("3dmodels/")
+      && !currentRepositoryPath.startsWith(expectedDirectory);
+    const duplicate = form.path === expected || knownNames.has(modelBasename(form.path));
+    if (duplicate || staleCategory || isUnsafeModelPath(form.path)) {
+      let start = form.start;
+      while (start > 0 && (source[start - 1] === " " || source[start - 1] === "\t")) start -= 1;
+      if (start > 0 && source[start - 1] === "\n") start -= 1;
+      return [{ start, end: form.end, value: "" }];
+    }
+    return [];
+  }).sort((a, b) => b.start - a.start);
+
+  let rewritten = source;
+  for (const replacement of replacements) {
+    rewritten = `${rewritten.slice(0, replacement.start)}${replacement.value}${rewritten.slice(replacement.end)}`;
+  }
+  return { source: rewritten, changed: rewritten !== source, references: footprintModelReferences(rewritten) };
+}
+
+export function validateFootprintModelLink(
+  source: string,
+  expectedRepositoryPath: string,
+  availableRepositoryPaths: Iterable<string>,
+  category: string,
+) {
+  const expected = kicadModelPath(expectedRepositoryPath);
+  const references = footprintModelReferences(source);
+  const available = new Set(availableRepositoryPaths);
+  const errors: string[] = [];
+  if (!available.has(expectedRepositoryPath)) errors.push("Model reference points to missing file");
+  if (references.filter((path) => path === expected).length !== 1) errors.push("3D model present but not linked");
+  if (references.some(isUnsafeModelPath)) errors.push("Absolute or temporary model path remains");
+  for (const reference of references) {
+    const repositoryPath = repositoryPathFromKiCadModelPath(reference);
+    if (repositoryPath?.startsWith("3dmodels/") && !available.has(repositoryPath)) {
+      errors.push("Model reference points to missing file");
+    }
+    if (repositoryPath?.startsWith("3dmodels/") && !repositoryPath.startsWith(`3dmodels/${category}.3dshapes/`)) {
+      errors.push("Model category does not match component category");
+    }
+  }
+  if (!expectedRepositoryPath.startsWith(`3dmodels/${category}.3dshapes/`)) errors.push("Model category does not match component category");
+  return { valid: errors.length === 0, errors: [...new Set(errors)], references };
+}
+
+export function retargetFootprintModelForCategory(
+  source: string,
+  targetRepositoryPaths: string[],
+  category: string,
+) {
+  const references = footprintModelReferences(source);
+  const target = targetRepositoryPaths.find((path) =>
+    references.some((reference) => modelBasename(reference) === modelBasename(path)),
+  ) ?? (targetRepositoryPaths.length === 1 ? targetRepositoryPaths[0] : undefined);
+  if (!target) return { source, linkedPath: null };
+  const repaired = repairFootprintModelLink(source, target, references.map(modelBasename));
+  const validation = validateFootprintModelLink(repaired.source, target, targetRepositoryPaths, category);
+  if (!validation.valid) throw new Error(validation.errors.join("; "));
+  return { source: repaired.source, linkedPath: target };
+}
+
+function rewriteFootprint(
+  source: string,
+  newName: string,
+  modelRepositoryPath?: string,
+  previousModelFilenames: string[] = [],
+) {
   let rewritten = source.replace(
     /(\((?:footprint|module)\s+")((?:\\.|[^"\\])*)(")/,
     `$1${escapeKiCadString(newName)}$3`,
@@ -479,12 +659,8 @@ function rewriteFootprint(source: string, newName: string, modelReference?: stri
     );
   }
   rewritten = markIntakeGenerator(rewritten);
-  if (!modelReference) return rewritten;
-  const modelPath = /(\(model\s+)("(?:\\.|[^"\\])*"|[^\s)]+)/;
-  if (modelPath.test(rewritten)) {
-    return rewritten.replace(modelPath, `$1"${escapeKiCadString(modelReference)}"`);
-  }
-  return appendModelBlock(rewritten, modelReference);
+  if (!modelRepositoryPath) return rewritten;
+  return repairFootprintModelLink(rewritten, modelRepositoryPath, previousModelFilenames).source;
 }
 
 async function sha256(bytes: Uint8Array) {
@@ -558,7 +734,8 @@ export async function normalizeAssets(
   const partName = sanitizeKiCadName(metadata.libraryName);
   const category = metadata.category;
   const footprints = supported.filter((asset) => asset.kind === "footprint");
-  const models = supported.filter((asset) => asset.kind === "model");
+  const models = preferSolidModels(supported.filter((asset) => asset.kind === "model"))
+    .sort((a, b) => modelPreference(a) - modelPreference(b));
   const symbols = supported.filter((asset) => asset.kind === "symbol");
   const datasheets = supported.filter((asset) => asset.kind === "datasheet");
   if ((footprints.length || models.length) && !metadata.packageName.trim()) {
@@ -589,6 +766,7 @@ export async function normalizeAssets(
   const primaryIndex = Math.max(0, footprints.findIndex((asset) => asset.id === metadata.primaryFootprintId));
   const primaryFootprint = footprintNames[primaryIndex] ? `${category}:${footprintNames[primaryIndex]}` : "";
   const normalized: NormalizedAsset[] = [];
+  const modelLinks: FootprintModelLink[] = [];
   const warnings = assets.flatMap((asset) => asset.warnings);
   if (footprints.length > 1) warnings.push(`All ${footprints.length} footprints will be saved. The symbol defaults to ${primaryFootprint}; choose an alternate footprint in KiCad when needed.`);
 
@@ -614,26 +792,67 @@ export async function normalizeAssets(
   }
 
   for (const [index, asset] of footprints.entries()) {
+    const existingModelNames = footprintModelReferences(textDecoder.decode(asset.bytes)).map(modelBasename);
+    const footprintSourceStem = basename(asset.name).replace(/\.kicad_mod$/i, "").toLowerCase();
+    const automaticMatch = models.findIndex((model) => {
+      const filename = modelBasename(model.name);
+      const stem = filename.replace(/\.(?:step|stp|iges|igs|wrl)$/i, "");
+      return existingModelNames.includes(filename) || stem === footprintSourceStem;
+    });
     const modelIndex = asset.modelAssetId === "none" ? -1 : asset.modelAssetId
       ? models.findIndex((model) => model.id === asset.modelAssetId)
-      : models.length === 1 ? 0 : -1;
+      : automaticMatch >= 0 ? automaticMatch
+        : models.length === 1 ? 0 : -1;
     const modelReference = modelNames[modelIndex];
-    const repositoryModelPath = modelReference
-      ? `\${MY_KICAD_LIB}/3dmodels/${category}.3dshapes/${modelReference}`
+    const modelRepoPath = modelReference
+      ? repositoryModelPath(category, modelReference)
       : undefined;
+    const original = textDecoder.decode(asset.bytes);
     const rewritten = rewriteFootprint(
-      textDecoder.decode(asset.bytes),
+      original,
       footprintNames[index],
-      repositoryModelPath,
+      modelRepoPath,
+      modelIndex >= 0 ? [models[modelIndex].name, models[modelIndex].sourceName] : [],
     );
+    const footprintPath = `footprints/${category}.pretty/${footprintNames[index]}.kicad_mod`;
+    if (modelRepoPath) {
+      const expectedPaths = modelNames.map((name) => repositoryModelPath(category, name));
+      const validation = validateFootprintModelLink(rewritten, modelRepoPath, expectedPaths, category);
+      if (!validation.valid) {
+        throw new Error(`${footprintNames[index]}: ${validation.errors.join("; ")}.`);
+      }
+      const hadExpectedLink = footprintModelReferences(original).includes(kicadModelPath(modelRepoPath));
+      modelLinks.push({
+        footprintName: footprintNames[index],
+        footprintPath,
+        modelName: modelReference,
+        modelPath: modelRepoPath,
+        kicadPath: kicadModelPath(modelRepoPath),
+        status: hadExpectedLink ? "linked" : "repaired",
+        message: hadExpectedLink ? "Linked to footprint" : "Linked to footprint automatically",
+      });
+    } else {
+      if (models.length && asset.modelAssetId !== "none") {
+        throw new Error(`${footprintNames[index]} has multiple possible 3D models. Choose the model for this footprint before committing.`);
+      }
+      modelLinks.push({
+        footprintName: footprintNames[index],
+        footprintPath,
+        modelName: null,
+        modelPath: null,
+        kicadPath: null,
+        status: "no-model",
+        message: "No 3D model included",
+      });
+    }
     normalized.push({
       id: asset.id,
       kind: "footprint",
       inputName: asset.sourceName,
-      outputPath: `footprints/${category}.pretty/${footprintNames[index]}.kicad_mod`,
+      outputPath: footprintPath,
       bytes: textEncoder.encode(rewritten),
       strategy: "replace",
-      notes: modelReference ? [`3D reference: ${repositoryModelPath}`] : ["No 3D model linked"],
+      notes: modelReference ? [`3D reference: ${kicadModelPath(modelRepoPath!)}`] : ["No 3D model linked"],
     });
   }
 
@@ -726,6 +945,7 @@ export async function normalizeAssets(
     symbolName: symbols.length ? partName : null,
     footprintNames,
     files: normalized,
+    modelLinks,
     warnings: [...new Set(warnings)],
     completeness,
   };

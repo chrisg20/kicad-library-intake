@@ -1,6 +1,7 @@
 import {
   extractAndRemoveSymbol,
   mergeKicadSymbolLibraries,
+  retargetFootprintModelForCategory,
   replaceLibraryPrefix,
   type NormalizedAsset,
 } from "@/lib/kicad";
@@ -221,6 +222,9 @@ async function moveCatalogComponentAttempt(
   }
   const writes = new Map<string, Uint8Array>();
   const deletes = new Set<string>();
+  const movedModelPaths = latestComponent.manifest.assets
+    .filter((asset) => asset.type === "model")
+    .map((asset) => categoryPath(asset.target_path, fromCategory, toCategory));
 
   for (const asset of latestComponent.manifest.assets) {
     if (asset.type === "symbol" || asset.type === "metadata") continue;
@@ -228,8 +232,12 @@ async function moveCatalogComponentAttempt(
     if (destination === asset.target_path) continue;
     const bytes = await fetchExistingFile(config, asset.target_path, parentSha);
     if (!bytes) throw new Error(`${asset.target_path} was not found in the repository snapshot. Refresh the catalog and try again.`);
-    const movedBytes = asset.type === "footprint"
-      ? textEncoder.encode(textDecoder.decode(bytes).replaceAll(`${fromCategory}.3dshapes`, `${toCategory}.3dshapes`))
+    const movedBytes = asset.type === "footprint" && movedModelPaths.length
+      ? textEncoder.encode(retargetFootprintModelForCategory(
+        textDecoder.decode(bytes),
+        movedModelPaths,
+        toCategory,
+      ).source)
       : bytes;
     writes.set(destination, movedBytes);
     deletes.add(asset.target_path);
