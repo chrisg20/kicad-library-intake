@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Box, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
+import { Box, Check, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Link2, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { ModelViewport } from "@/components/model-viewport";
@@ -27,6 +27,7 @@ import { displayCategory, libraryCategories, sanitizeCatalogTitle, sanitizeManuf
 import {
   fetchRepositoryFile,
   listCatalogComponents,
+  linkCatalogFootprintModel,
   moveCatalogComponent,
   parseRepository,
   updateCatalogComponentMetadata,
@@ -35,7 +36,7 @@ import {
   type GitHubConfig,
   type RepositoryInfo,
 } from "@/lib/github";
-import type { IntakeAsset } from "@/lib/kicad";
+import { footprintModelReferences, kicadModelPath, type IntakeAsset } from "@/lib/kicad";
 
 type Props = {
   repositoryInfo: RepositoryInfo | null;
@@ -115,6 +116,12 @@ export function CatalogView(props: Props) {
   const [editBusy, setEditBusy] = useState(false);
   const [moveTarget, setMoveTarget] = useState("");
   const [moveItem, setMoveItem] = useState<CatalogComponent | null>(null);
+  const [linkItem, setLinkItem] = useState<CatalogComponent | null>(null);
+  const [linkFootprint, setLinkFootprint] = useState("");
+  const [linkModel, setLinkModel] = useState("");
+  const [linkReferences, setLinkReferences] = useState<string[] | null>(null);
+  const [linkReadBusy, setLinkReadBusy] = useState(false);
+  const [linkBusy, setLinkBusy] = useState(false);
   const [selectedSection, setSelectedSection] = useState(preferredSections[0] ?? "");
 
   const sections = useMemo(() => {
@@ -243,6 +250,49 @@ export function CatalogView(props: Props) {
     }
   }
 
+  async function loadLinkReferences(footprintPath: string) {
+    if (!footprintPath) return setLinkReferences(null);
+    setLinkReadBusy(true);
+    setLinkReferences(null);
+    try {
+      const bytes = await fetchRepositoryFile(configFor(props), footprintPath);
+      setLinkReferences(footprintModelReferences(new TextDecoder().decode(bytes)));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The footprint could not be checked.");
+    } finally {
+      setLinkReadBusy(false);
+    }
+  }
+
+  function openLink(component: CatalogComponent) {
+    const footprintPath = component.manifest.assets.find((asset) => asset.type === "footprint")?.target_path ?? "";
+    const modelPath = component.manifest.assets.find((asset) => asset.type === "model")?.target_path ?? "";
+    setLinkItem(component);
+    setLinkFootprint(footprintPath);
+    setLinkModel(modelPath);
+    void loadLinkReferences(footprintPath);
+  }
+
+  async function saveLink() {
+    if (!linkItem || !linkFootprint || !linkModel) return;
+    setLinkBusy(true);
+    try {
+      const result = await linkCatalogFootprintModel(configFor(props), linkItem, linkFootprint, linkModel);
+      setComponents(await listCatalogComponents(configFor(props)));
+      setLinkItem(null);
+      toast.success(result.alreadyLinked ? "This model was already linked" : "3D model linked to footprint");
+    } catch (error) {
+      try {
+        setComponents(await listCatalogComponents(configFor(props)));
+      } catch {
+        // Preserve the linking error when the follow-up refresh also fails.
+      }
+      toast.error(error instanceof Error ? error.message : "The 3D model could not be linked.");
+    } finally {
+      setLinkBusy(false);
+    }
+  }
+
   if (!props.repositoryInfo) {
     return (
       <section className="panel grid min-h-[32rem] place-items-center p-8 text-center">
@@ -350,6 +400,11 @@ export function CatalogView(props: Props) {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="border-slate-700 bg-slate-900 text-slate-200">
                                   <DropdownMenuItem onSelect={() => openEdit(component)} className="focus:bg-slate-800 focus:text-slate-50"><Pencil /> Edit details</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    onSelect={() => openLink(component)}
+                                    disabled={!manifest.assets.some((asset) => asset.type === "footprint") || !manifest.assets.some((asset) => asset.type === "model")}
+                                    className="focus:bg-slate-800 focus:text-slate-50"
+                                  ><Link2 /> Link 3D model</DropdownMenuItem>
                                   <DropdownMenuItem onSelect={() => openMove(component)} className="focus:bg-slate-800 focus:text-slate-50"><MoveRight /> Move section</DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -397,6 +452,60 @@ export function CatalogView(props: Props) {
             <Button variant="outline" onClick={() => setEditing(null)} disabled={editBusy} className="border-slate-700 bg-slate-950/50">Cancel</Button>
             <Button onClick={() => void saveEdit()} disabled={editBusy || !editValues.mpn.trim()} className="bg-teal-300 text-slate-950 hover:bg-teal-200">
               {editBusy && <Loader2 className="animate-spin" />} Save changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(linkItem)} onOpenChange={(open) => { if (!open && !linkBusy) setLinkItem(null); }}>
+        <DialogContent className="border-slate-700 bg-slate-900 text-slate-100 sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Link 3D model</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Attach a model already stored with <span className="font-mono text-slate-300">{linkItem?.manifest.component.library_name}</span>. Existing scale, rotation, and offset values are preserved.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-5 py-2">
+            <label className="grid gap-2 text-sm text-slate-300">Footprint
+              <Select value={linkFootprint} onValueChange={(value) => { setLinkFootprint(value ?? ""); void loadLinkReferences(value ?? ""); }}>
+                <SelectTrigger className="w-full border-slate-700 bg-slate-950/70"><SelectValue placeholder="Choose a footprint" /></SelectTrigger>
+                <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
+                  {linkItem?.manifest.assets.filter((asset) => asset.type === "footprint").map((asset) => (
+                    <SelectItem key={asset.target_path} value={asset.target_path}>{asset.target_path.split("/").at(-1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="grid gap-2 text-sm text-slate-300">3D model
+              <Select value={linkModel} onValueChange={(value) => setLinkModel(value ?? "")}>
+                <SelectTrigger className="w-full border-slate-700 bg-slate-950/70"><SelectValue placeholder="Choose a model" /></SelectTrigger>
+                <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
+                  {linkItem?.manifest.assets.filter((asset) => asset.type === "model").map((asset) => (
+                    <SelectItem key={asset.target_path} value={asset.target_path}>{asset.target_path.split("/").at(-1)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <div className="rounded-xl border border-slate-800 bg-slate-950/55 p-4">
+              <div className="text-xs text-slate-500">KiCad path</div>
+              <div className="mt-1 break-all font-mono text-xs text-teal-200">{linkModel ? kicadModelPath(linkModel) : "Choose a model"}</div>
+              <div className="mt-4 text-xs text-slate-500">Status</div>
+              <div className="mt-1 flex items-center gap-2 text-sm text-slate-300">
+                {linkReadBusy ? <Loader2 className="size-4 animate-spin text-slate-500" /> : linkModel && linkReferences?.includes(kicadModelPath(linkModel)) ? <Check className="size-4 text-emerald-300" /> : <Link2 className="size-4 text-amber-300" />}
+                {linkReadBusy ? "Checking footprint…" : linkModel && linkReferences?.includes(kicadModelPath(linkModel)) ? "Already linked" : linkReferences?.length ? "Existing model reference will be replaced" : "Ready to add model reference"}
+              </div>
+              {Boolean(linkReferences?.length) && (
+                <div className="mt-3 space-y-1 border-t border-slate-800 pt-3">
+                  <div className="text-xs text-slate-600">Current reference</div>
+                  {linkReferences!.map((reference) => <div key={reference} className="break-all font-mono text-[11px] text-slate-500">{reference}</div>)}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkItem(null)} disabled={linkBusy} className="border-slate-700 bg-slate-950/50">Cancel</Button>
+            <Button onClick={() => void saveLink()} disabled={linkBusy || linkReadBusy || !linkFootprint || !linkModel} className="bg-teal-300 text-slate-950 hover:bg-teal-200">
+              {linkBusy && <Loader2 className="animate-spin" />} Link model
             </Button>
           </DialogFooter>
         </DialogContent>

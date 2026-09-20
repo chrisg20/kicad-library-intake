@@ -1,8 +1,11 @@
 import {
   extractAndRemoveSymbol,
   mergeKicadSymbolLibraries,
+  repairFootprintModelLink,
   retargetFootprintModelForCategory,
   replaceLibraryPrefix,
+  sha256Bytes,
+  validateFootprintModelLink,
   type NormalizedAsset,
 } from "@/lib/kicad";
 import { sanitizeCatalogTitle, sanitizeManufacturerName } from "@/lib/categories";
@@ -360,6 +363,99 @@ export async function updateCatalogComponentMetadata(
     }],
     `Update ${manifest.component.library_name} catalog details`,
   );
+}
+
+async function linkCatalogFootprintModelAttempt(
+  config: GitHubConfig,
+  component: CatalogComponent,
+  footprintPath: string,
+  modelPath: string,
+) {
+  const owner = encodeURIComponent(config.owner);
+  const repo = encodeURIComponent(config.repo);
+  const refPath = config.branch.split("/").map(encodeURIComponent).join("/");
+  const ref = await githubRequest<{ object: { sha: string } }>(config, `/repos/${owner}/${repo}/git/ref/heads/${refPath}`);
+  const parentSha = ref.object.sha;
+  const parent = await githubRequest<{ tree: { sha: string } }>(config, `/repos/${owner}/${repo}/git/commits/${parentSha}`);
+  const manifestBytes = await fetchExistingFile(config, component.manifestPath, parentSha);
+  if (!manifestBytes) throw new Error("This component changed in the repository. Refresh the catalog and try again.");
+  const manifest = JSON.parse(textDecoder.decode(manifestBytes)) as CatalogManifest;
+  const footprint = manifest.assets.find((asset) => asset.type === "footprint" && asset.target_path === footprintPath);
+  const model = manifest.assets.find((asset) => asset.type === "model" && asset.target_path === modelPath);
+  if (!footprint) throw new Error("The selected footprint is no longer part of this component. Refresh the catalog and try again.");
+  if (!model) throw new Error("The selected 3D model is no longer part of this component. Refresh the catalog and try again.");
+  const category = manifest.library.category;
+  if (!footprintPath.startsWith(`footprints/${category}.pretty/`)) throw new Error("The selected footprint is outside the component category.");
+  if (!modelPath.startsWith(`3dmodels/${category}.3dshapes/`)) throw new Error("The selected model is outside the component category.");
+
+  const [footprintBytes, modelBytes] = await Promise.all([
+    fetchExistingFile(config, footprintPath, parentSha),
+    fetchExistingFile(config, modelPath, parentSha),
+  ]);
+  if (!footprintBytes) throw new Error(`${footprintPath} was not found in the repository.`);
+  if (!modelBytes) throw new Error(`${modelPath} was not found in the repository.`);
+
+  const original = textDecoder.decode(footprintBytes);
+  const repaired = repairFootprintModelLink(original, modelPath, [model.source_file, modelPath.split("/").at(-1) ?? ""]);
+  const modelPaths = manifest.assets.filter((asset) => asset.type === "model").map((asset) => asset.target_path);
+  const validation = validateFootprintModelLink(repaired.source, modelPath, modelPaths, category);
+  if (!validation.valid) throw new Error(validation.errors.join("; "));
+
+  const repairedBytes = textEncoder.encode(repaired.source);
+  const nextHash = await sha256Bytes(repairedBytes);
+  if (!repaired.changed && footprint.sha256 === nextHash) {
+    return { sha: parentSha, shortSha: parentSha.slice(0, 7), url: `https://github.com/${config.owner}/${config.repo}/commit/${parentSha}`, alreadyLinked: true };
+  }
+  footprint.sha256 = nextHash;
+  const nextManifestBytes = textEncoder.encode(`${JSON.stringify(manifest, null, 2)}\n`);
+  const writes = [
+    { path: footprintPath, bytes: repairedBytes },
+    { path: component.manifestPath, bytes: nextManifestBytes },
+  ];
+  const blobs = await Promise.all(writes.map(async (file) => {
+    const blob = await githubRequest<{ sha: string }>(config, `/repos/${owner}/${repo}/git/blobs`, {
+      method: "POST",
+      body: JSON.stringify({ content: bytesToBase64(file.bytes), encoding: "base64" }),
+    });
+    return { path: file.path, sha: blob.sha };
+  }));
+  const tree = await githubRequest<{ sha: string }>(config, `/repos/${owner}/${repo}/git/trees`, {
+    method: "POST",
+    body: JSON.stringify({
+      base_tree: parent.tree.sha,
+      tree: blobs.map((blob) => ({ path: blob.path, mode: "100644", type: "blob", sha: blob.sha })),
+    }),
+  });
+  const commit = await githubRequest<{ sha: string; html_url: string }>(config, `/repos/${owner}/${repo}/git/commits`, {
+    method: "POST",
+    body: JSON.stringify({
+      message: `Link ${modelPath.split("/").at(-1)} to ${footprintPath.split("/").at(-1)}`,
+      tree: tree.sha,
+      parents: [parentSha],
+    }),
+  });
+  await githubRequest(config, `/repos/${owner}/${repo}/git/refs/heads/${refPath}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sha: commit.sha, force: false }),
+  });
+  return { sha: commit.sha, shortSha: commit.sha.slice(0, 7), url: commit.html_url, alreadyLinked: false };
+}
+
+export async function linkCatalogFootprintModel(
+  config: GitHubConfig,
+  component: CatalogComponent,
+  footprintPath: string,
+  modelPath: string,
+) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await linkCatalogFootprintModelAttempt(config, component, footprintPath, modelPath);
+    } catch (error) {
+      if (!isRefUpdateConflict(error)) throw error;
+      if (attempt === 2) throw new Error("The repository kept changing while the model was linked. Refresh the catalog and try once more.");
+    }
+  }
+  throw new Error("The 3D model could not be linked.");
 }
 
 async function consolidateFiles(config: GitHubConfig, files: NormalizedAsset[]) {

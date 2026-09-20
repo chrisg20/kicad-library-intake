@@ -663,7 +663,7 @@ function rewriteFootprint(
   return repairFootprintModelLink(rewritten, modelRepositoryPath, previousModelFilenames).source;
 }
 
-async function sha256(bytes: Uint8Array) {
+export async function sha256Bytes(bytes: Uint8Array) {
   const owned = new Uint8Array(bytes);
   const digest = await crypto.subtle.digest("SHA-256", owned.buffer);
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
@@ -897,7 +897,7 @@ export async function normalizeAssets(
       type: file.kind,
       source_file: file.inputName,
       target_path: file.outputPath,
-      sha256: await sha256(file.bytes),
+      sha256: await sha256Bytes(file.bytes),
     })),
   );
   const manifest = {
