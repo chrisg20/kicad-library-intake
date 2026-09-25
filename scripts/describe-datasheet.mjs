@@ -42,11 +42,10 @@ async function describe() {
       Authorization: `Bearer ${openRouterKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": "https://chrisg20.github.io/kicad-library-intake/",
-      "X-Title": "KiCad Library Intake",
+      "X-OpenRouter-Title": "KiCad Library Intake",
     },
     body: JSON.stringify({
-      model: process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
-      reasoning: { effort: "low", exclude: true },
+      model: process.env.OPENROUTER_MODEL || "~google/gemini-flash-latest",
       messages: [{
         role: "user",
         content: [
@@ -81,7 +80,14 @@ async function describe() {
     }),
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter returned ${response.status}.`);
+  // OpenRouter can return an error in a 200 response when the provider fails
+  // after generation has started, so inspect the payload as well as HTTP status.
+  if (!response.ok || payload?.error) {
+    const providerMessage = payload?.error?.message;
+    const errorType = payload?.error?.metadata?.error_type;
+    const detail = [providerMessage, errorType && `type: ${errorType}`].filter(Boolean).join("; ");
+    throw new Error(detail ? `OpenRouter error: ${detail}` : `OpenRouter returned ${response.status}.`);
+  }
   const choice = payload.choices?.[0];
   const messageContent = choice?.message?.content;
   const outputText = typeof messageContent === "string"
@@ -92,7 +98,12 @@ async function describe() {
     const finishReason = choice?.finish_reason || "unknown";
     if (refusal) throw new Error(`OpenRouter refused the request: ${refusal}`);
     if (finishReason === "length") throw new Error("OpenRouter reached its output limit before returning metadata. Run the suggestion again.");
-    throw new Error(`OpenRouter returned no metadata (finish reason: ${finishReason}).`);
+    const responseDetails = [
+      payload?.provider && `provider: ${payload.provider}`,
+      payload?.model && `model: ${payload.model}`,
+      payload?.id && `request: ${payload.id}`,
+    ].filter(Boolean).join(", ");
+    throw new Error(`OpenRouter returned no metadata (finish reason: ${finishReason}${responseDetails ? `; ${responseDetails}` : ""}).`);
   }
   const jsonText = outputText.trim().replace(/^```json\s*/i, "").replace(/```$/, "").trim();
   const suggestion = JSON.parse(jsonText);
