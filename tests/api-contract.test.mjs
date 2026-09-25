@@ -19,3 +19,14 @@ test("GitHub Pages workflow publishes the static client", async () => {
   assert.match(workflow, /path:\s*dist\/client/);
   assert.match(workflow, /actions\/deploy-pages@v5/);
 });
+
+
+test("datasheet AI backend uses the OpenRouter secret and endpoint", async () => {
+  const workflow = await readFile(`${root}/.github/workflows/datasheet-describe.yml`, "utf8");
+  const script = await readFile(`${root}/scripts/describe-datasheet.mjs`, "utf8");
+  assert.match(workflow, /OPENROUTER_API_KEY:\s*\$\{\{\s*secrets\.OPENROUTER_API_KEY\s*\}\}/);
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY/);
+  assert.match(script, /https:\/\/openrouter\.ai\/api\/v1\/chat\/completions/);
+  assert.match(script, /OPENROUTER_API_KEY/);
+  assert.doesNotMatch(script, /api\.openai\.com\/v1\/responses/);
+});

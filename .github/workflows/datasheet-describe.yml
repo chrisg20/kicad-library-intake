@@ -45,7 +45,8 @@ jobs:
       - name: Generate catalog text from datasheet
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ vars.OPENROUTER_MODEL }}
           INPUT_REQUEST_ID: ${{ inputs.request_id }}
           INPUT_BLOB_SHA: ${{ inputs.blob_sha }}
           INPUT_FILENAME: ${{ inputs.filename }}

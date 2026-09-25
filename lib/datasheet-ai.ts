@@ -106,7 +106,7 @@ export async function describeDatasheetWithActions(
   const result = JSON.parse(textDecoder.decode(resultBytes)) as DescriptionResult;
   if (result.kind === "error") throw new Error(result.message);
   if (!libraryCategories.some((category) => category.id === result.category)) {
-    throw new Error("OpenAI returned an unknown component category.");
+    throw new Error("The AI returned an unknown component category.");
   }
   return { title: result.title, description: result.description, category: result.category };
 }

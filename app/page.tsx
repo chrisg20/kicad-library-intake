@@ -688,7 +688,7 @@ export default function Home() {
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0">
                           <p className="text-sm font-medium text-slate-200">Datasheet <span className="font-normal text-slate-500">(optional)</span></p>
-                          <p className="mt-1 truncate text-sm text-slate-500">{datasheetAsset ? `${datasheetAsset.name} · ${datasheetAiBusy ? "extracting metadata…" : "ready for OpenAI"}` : "No PDF found automatically; attach one for catalog text and archival."}</p>
+                          <p className="mt-1 truncate text-sm text-slate-500">{datasheetAsset ? `${datasheetAsset.name} · ${datasheetAiBusy ? "extracting metadata…" : "ready for AI metadata"}` : "No PDF found automatically; attach one for catalog text and archival."}</p>
                         </div>
                         <div className="flex shrink-0 gap-2">
                           <Button type="button" variant="outline" onClick={() => lcscDatasheetInputRef.current?.click()} className="border-slate-700 bg-slate-950/60 text-slate-300">
@@ -707,7 +707,7 @@ export default function Home() {
                         className="hidden"
                         onChange={(event) => { void addLcscDatasheet(Array.from(event.target.files ?? [])); event.currentTarget.value = ""; }}
                       />
-                      <p className="mt-3 text-xs leading-5 text-slate-500">When LCSC provides a PDF, it is attached automatically and ready for OpenAI. You can replace it manually. OpenAI suggests an editable English title, description, and category.</p>
+                      <p className="mt-3 text-xs leading-5 text-slate-500">When LCSC provides a PDF, it is attached automatically and ready for AI metadata. You can replace it manually. The AI suggests an editable English title, description, and category.</p>
                     </div>
                   </div>
                 )}
@@ -749,7 +749,7 @@ export default function Home() {
                 {sourceMode === "upload" && datasheetAsset && (
                   <div className="mt-5 flex flex-col gap-3 rounded-xl border border-violet-400/20 bg-violet-400/[0.035] p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-200">OpenAI metadata</p>
+                      <p className="text-sm font-medium text-slate-200">AI metadata</p>
                       <p className="mt-1 truncate text-sm text-slate-500">
                         {datasheetAiBusy ? `Reading ${datasheetAsset.name}…` : `${datasheetAsset.name} is ready; extraction starts automatically on upload.`}
                       </p>
