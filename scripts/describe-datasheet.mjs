@@ -1,5 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
 
 const requestId = process.env.INPUT_REQUEST_ID || "";
 const blobSha = process.env.INPUT_BLOB_SHA || "";
@@ -12,6 +17,23 @@ const repository = process.env.GITHUB_REPOSITORY || "";
 const githubToken = process.env.GITHUB_TOKEN || "";
 const openRouterKey = process.env.OPENROUTER_API_KEY || "";
 const outputDir = process.env.OUTPUT_DIR || "datasheet-description-output";
+
+async function keepFirstThreePages(bytes) {
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "kicad-datasheet-"));
+  const sourcePath = path.join(temporaryDirectory, "source.pdf");
+  const trimmedPath = path.join(temporaryDirectory, "first-three-pages.pdf");
+  try {
+    await writeFile(sourcePath, bytes);
+    const { stdout } = await run("qpdf", ["--show-npages", sourcePath]);
+    const pageCount = Number.parseInt(stdout.trim(), 10);
+    if (!Number.isInteger(pageCount) || pageCount < 1) throw new Error("The datasheet page count could not be determined.");
+    if (pageCount <= 3) return bytes;
+    await run("qpdf", [sourcePath, "--pages", ".", "1-3", "--", trimmedPath]);
+    return await readFile(trimmedPath);
+  } finally {
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
 
 async function describe() {
   if (!/^[0-9a-f-]{36}$/i.test(requestId)) throw new Error("Invalid request ID.");
@@ -35,6 +57,7 @@ async function describe() {
   const base64 = String(blob.content || "").replace(/\s/g, "");
   const bytes = Buffer.from(base64, "base64");
   if (bytes.subarray(0, 5).toString("ascii") !== "%PDF-") throw new Error("The uploaded file is not a valid PDF.");
+  const uploadBase64 = (await keepFirstThreePages(bytes)).toString("base64");
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -55,7 +78,7 @@ async function describe() {
           },
           {
             type: "file",
-            file: { filename, file_data: `data:application/pdf;base64,${base64}` },
+            file: { filename, file_data: `data:application/pdf;base64,${uploadBase64}` },
           },
         ],
       }],
