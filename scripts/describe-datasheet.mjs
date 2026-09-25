@@ -46,6 +46,7 @@ async function describe() {
     },
     body: JSON.stringify({
       model: process.env.OPENROUTER_MODEL || "openai/gpt-5-mini",
+      reasoning: { effort: "low", exclude: true },
       messages: [{
         role: "user",
         content: [
@@ -76,17 +77,25 @@ async function describe() {
           },
         },
       },
-      max_tokens: 1200,
+      max_tokens: 4000,
     }),
   });
   const payload = await response.json();
   if (!response.ok) throw new Error(payload?.error?.message || `OpenRouter returned ${response.status}.`);
-  const messageContent = payload.choices?.[0]?.message?.content;
+  const choice = payload.choices?.[0];
+  const messageContent = choice?.message?.content;
   const outputText = typeof messageContent === "string"
     ? messageContent
-    : messageContent?.find?.((item) => item.type === "text")?.text;
-  if (!outputText) throw new Error("OpenRouter did not return a title and description.");
-  const suggestion = JSON.parse(outputText);
+    : messageContent?.find?.((item) => item.type === "text" || item.type === "output_text")?.text;
+  if (!outputText?.trim()) {
+    const refusal = choice?.message?.refusal;
+    const finishReason = choice?.finish_reason || "unknown";
+    if (refusal) throw new Error(`OpenRouter refused the request: ${refusal}`);
+    if (finishReason === "length") throw new Error("OpenRouter reached its output limit before returning metadata. Run the suggestion again.");
+    throw new Error(`OpenRouter returned no metadata (finish reason: ${finishReason}).`);
+  }
+  const jsonText = outputText.trim().replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+  const suggestion = JSON.parse(jsonText);
   const title = suggestion.title
     .replace(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu, "")
     .replace(/\s{2,}/g, " ")
