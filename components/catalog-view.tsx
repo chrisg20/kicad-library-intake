@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Box, Check, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Link2, Loader2, MoveRight, Pencil, RefreshCw, Search } from "lucide-react";
+import { Box, Check, EllipsisVertical, ExternalLink, FileBox, FileCode2, FileText, Link2, Loader2, MoveRight, Pencil, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ModelViewport } from "@/components/model-viewport";
@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { displayCategory, libraryCategories, sanitizeCatalogTitle, sanitizeManufacturerName } from "@/lib/categories";
 import {
+  deleteCatalogComponent,
   fetchRepositoryFile,
   listCatalogComponents,
   linkCatalogFootprintModel,
@@ -111,6 +112,8 @@ export function CatalogView(props: Props) {
   const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
   const [movingPath, setMovingPath] = useState("");
+  const [deletingPath, setDeletingPath] = useState("");
+  const [deleteItem, setDeleteItem] = useState<CatalogComponent | null>(null);
   const [editing, setEditing] = useState<CatalogComponent | null>(null);
   const [editValues, setEditValues] = useState<CatalogMetadataUpdate>(emptyEdit);
   const [editBusy, setEditBusy] = useState(false);
@@ -293,6 +296,32 @@ export function CatalogView(props: Props) {
     }
   }
 
+  async function removeComponent(component: CatalogComponent) {
+    setDeletingPath(component.manifestPath);
+    try {
+      const result = await deleteCatalogComponent(configFor(props), component);
+      const refreshed = await listCatalogComponents(configFor(props));
+      setComponents(refreshed);
+      const available = [...new Set(refreshed.map((item) => item.manifest.library.category))];
+      setSelectedSection((current) => available.includes(current) ? current : (available[0] ?? ""));
+      setDeleteItem(null);
+      toast.success(`${component.manifest.component.library_name} deleted`, {
+        description: result.sharedAssetsKept
+          ? `${result.sharedAssetsKept} shared asset${result.sharedAssetsKept === 1 ? " was" : "s were"} retained.`
+          : `Committed as ${result.shortSha}.`,
+      });
+    } catch (error) {
+      try {
+        setComponents(await listCatalogComponents(configFor(props)));
+      } catch {
+        // Preserve the delete error when the follow-up refresh also fails.
+      }
+      toast.error(error instanceof Error ? error.message : "The component could not be deleted.");
+    } finally {
+      setDeletingPath("");
+    }
+  }
+
   if (!props.repositoryInfo) {
     return (
       <section className="panel grid min-h-[32rem] place-items-center p-8 text-center">
@@ -394,8 +423,8 @@ export function CatalogView(props: Props) {
                             <td className="px-5 py-4 text-right">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${manifest.component.library_name}`} disabled={movingPath === component.manifestPath} className="text-slate-500 hover:bg-slate-800 hover:text-slate-100">
-                                    {movingPath === component.manifestPath ? <Loader2 className="animate-spin" /> : <EllipsisVertical />}
+                                  <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${manifest.component.library_name}`} disabled={movingPath === component.manifestPath || deletingPath === component.manifestPath} className="text-slate-500 hover:bg-slate-800 hover:text-slate-100">
+                                    {movingPath === component.manifestPath || deletingPath === component.manifestPath ? <Loader2 className="animate-spin" /> : <EllipsisVertical />}
                                   </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="border-slate-700 bg-slate-900 text-slate-200">
@@ -406,6 +435,7 @@ export function CatalogView(props: Props) {
                                     className="focus:bg-slate-800 focus:text-slate-50"
                                   ><Link2 /> Link 3D model</DropdownMenuItem>
                                   <DropdownMenuItem onSelect={() => openMove(component)} className="focus:bg-slate-800 focus:text-slate-50"><MoveRight /> Move section</DropdownMenuItem>
+                                  <DropdownMenuItem onSelect={() => setDeleteItem(component)} className="text-red-300 focus:bg-red-950/60 focus:text-red-200"><Trash2 /> Delete component</DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </td>
@@ -531,6 +561,26 @@ export function CatalogView(props: Props) {
             <Button variant="outline" onClick={() => setMoveItem(null)} disabled={Boolean(movingPath)} className="border-slate-700 bg-slate-950/50">Cancel</Button>
             <Button onClick={() => moveItem && void move(moveItem, moveTarget)} disabled={!moveItem || Boolean(movingPath) || moveTarget === moveItem.manifest.library.category} className="bg-teal-300 text-slate-950 hover:bg-teal-200">
               {movingPath && <Loader2 className="animate-spin" />} Move component
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(deleteItem)} onOpenChange={(open) => { if (!open && !deletingPath) setDeleteItem(null); }}>
+        <DialogContent className="border-red-950/80 bg-slate-900 text-slate-100 sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete component?</DialogTitle>
+            <DialogDescription className="text-slate-400">
+              This will remove <span className="font-mono text-slate-200">{deleteItem?.manifest.component.library_name}</span>, its catalog record, and its unshared KiCad assets in one Git commit. Shared assets are retained.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-lg border border-red-950/80 bg-red-950/20 p-3 text-sm text-red-200">
+            This cannot be undone from the catalog. It can still be recovered from Git history.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteItem(null)} disabled={Boolean(deletingPath)} className="border-slate-700 bg-slate-950/50">Cancel</Button>
+            <Button variant="destructive" onClick={() => deleteItem && void removeComponent(deleteItem)} disabled={!deleteItem || Boolean(deletingPath)}>
+              {deletingPath ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete component
             </Button>
           </DialogFooter>
         </DialogContent>

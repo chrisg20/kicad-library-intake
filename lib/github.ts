@@ -331,6 +331,139 @@ export async function moveCatalogComponent(
   throw new Error("The component could not be moved.");
 }
 
+function isDeletableComponentAsset(asset: CatalogManifest["assets"][number], category: string) {
+  const path = asset.target_path;
+  if (asset.type === "footprint") return path.startsWith(`footprints/${category}.pretty/`) && path.endsWith(".kicad_mod");
+  if (asset.type === "model") return path.startsWith(`3dmodels/${category}.3dshapes/`)
+    && /\.(?:step|stp|iges|igs|wrl)$/i.test(path);
+  if (asset.type === "datasheet") return path.startsWith(`datasheets/${category}/`) && path.toLowerCase().endsWith(".pdf");
+  return false;
+}
+
+async function deleteCatalogComponentAttempt(config: GitHubConfig, component: CatalogComponent) {
+  const owner = encodeURIComponent(config.owner);
+  const repo = encodeURIComponent(config.repo);
+  const refPath = config.branch.split("/").map(encodeURIComponent).join("/");
+  const ref = await githubRequest<{ object: { sha: string } }>(config, `/repos/${owner}/${repo}/git/ref/heads/${refPath}`);
+  const parentSha = ref.object.sha;
+  const parent = await githubRequest<{ tree: { sha: string } }>(config, `/repos/${owner}/${repo}/git/commits/${parentSha}`);
+  const snapshot = await githubRequest<{ truncated?: boolean; tree: Array<{ path: string; type: string }> }>(
+    config,
+    `/repos/${owner}/${repo}/git/trees/${parentSha}?recursive=1`,
+  );
+  if (snapshot.truncated) throw new Error("The repository tree is too large to delete this component safely.");
+  const repositoryPaths = new Set(snapshot.tree.filter((entry) => entry.type === "blob").map((entry) => entry.path));
+  const latestManifestBytes = await fetchExistingFile(config, component.manifestPath, parentSha);
+  if (!latestManifestBytes) throw new Error("This component changed in the repository. The catalog has been refreshed; try deleting it again.");
+  const latestManifest = JSON.parse(textDecoder.decode(latestManifestBytes)) as CatalogManifest;
+  if (!latestManifest.component?.library_name || !latestManifest.library?.category || !Array.isArray(latestManifest.assets)) {
+    throw new Error("The component manifest is no longer valid. Refresh the catalog and try again.");
+  }
+
+  const metadataPaths = snapshot.tree
+    .filter((entry) => entry.type === "blob" && /^metadata\/[^/]+\/[^/]+\.json$/i.test(entry.path) && entry.path !== component.manifestPath)
+    .map((entry) => entry.path);
+  const referencedByOtherComponents = new Set<string>();
+  for (let index = 0; index < metadataPaths.length; index += 8) {
+    const manifests = await Promise.all(metadataPaths.slice(index, index + 8).map(async (manifestPath) => {
+      const bytes = await fetchExistingFile(config, manifestPath, parentSha);
+      if (!bytes) return null;
+      try {
+        return JSON.parse(textDecoder.decode(bytes)) as CatalogManifest;
+      } catch {
+        return null;
+      }
+    }));
+    for (const manifest of manifests) {
+      for (const asset of manifest?.assets ?? []) referencedByOtherComponents.add(asset.target_path);
+    }
+  }
+
+  const writes = new Map<string, Uint8Array>();
+  const deletes = new Set<string>([component.manifestPath]);
+  const category = latestManifest.library.category;
+  let sharedAssetsKept = 0;
+  for (const asset of latestManifest.assets) {
+    if (!isDeletableComponentAsset(asset, category) || !repositoryPaths.has(asset.target_path)) continue;
+    if (referencedByOtherComponents.has(asset.target_path)) {
+      sharedAssetsKept += 1;
+      continue;
+    }
+    deletes.add(asset.target_path);
+  }
+
+  if (latestManifest.library.symbol) {
+    const symbolName = latestManifest.library.symbol.split(":").slice(1).join(":");
+    const symbolPath = `symbols/${category}.kicad_sym`;
+    const symbolBytes = await fetchExistingFile(config, symbolPath, parentSha);
+    if (symbolBytes && symbolName) {
+      let source = textDecoder.decode(symbolBytes);
+      const symbolCount = Math.max(1, latestManifest.assets.filter((asset) => asset.type === "symbol").length);
+      for (let index = 0; index < symbolCount; index += 1) {
+        const name = index === 0 ? symbolName : `${symbolName}_${index + 1}`;
+        try {
+          source = extractAndRemoveSymbol(source, name).remaining;
+        } catch (error) {
+          if (!(error instanceof Error) || !/was not found in its library/i.test(error.message)) throw error;
+        }
+      }
+      writes.set(symbolPath, textEncoder.encode(source));
+    }
+  }
+
+  const blobs = await Promise.all([...writes].map(async ([path, bytes]) => {
+    const blob = await githubRequest<{ sha: string }>(config, `/repos/${owner}/${repo}/git/blobs`, {
+      method: "POST",
+      body: JSON.stringify({ content: bytesToBase64(bytes), encoding: "base64" }),
+    });
+    return { path, sha: blob.sha };
+  }));
+  const writePaths = new Set(blobs.map((blob) => blob.path));
+  const tree = await githubRequest<{ sha: string }>(config, `/repos/${owner}/${repo}/git/trees`, {
+    method: "POST",
+    body: JSON.stringify({
+      base_tree: parent.tree.sha,
+      tree: [
+        ...blobs.map((blob) => ({ path: blob.path, mode: "100644", type: "blob", sha: blob.sha })),
+        ...[...deletes].filter((path) => !writePaths.has(path)).map((path) => ({ path, mode: "100644", type: "blob", sha: null })),
+      ],
+    }),
+  });
+  const commit = await githubRequest<{ sha: string; html_url: string }>(config, `/repos/${owner}/${repo}/git/commits`, {
+    method: "POST",
+    body: JSON.stringify({
+      message: `Delete ${latestManifest.component.library_name} from ${category}`,
+      tree: tree.sha,
+      parents: [parentSha],
+    }),
+  });
+  await githubRequest(config, `/repos/${owner}/${repo}/git/refs/heads/${refPath}`, {
+    method: "PATCH",
+    body: JSON.stringify({ sha: commit.sha, force: false }),
+  });
+  return {
+    sha: commit.sha,
+    shortSha: commit.sha.slice(0, 7),
+    url: commit.html_url,
+    filesDeleted: deletes.size,
+    sharedAssetsKept,
+  };
+}
+
+export async function deleteCatalogComponent(config: GitHubConfig, component: CatalogComponent) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await deleteCatalogComponentAttempt(config, component);
+    } catch (error) {
+      if (!isRefUpdateConflict(error)) throw error;
+      if (attempt === 2) {
+        throw new Error("The repository kept changing while this component was being deleted. The catalog has been refreshed; try once more.");
+      }
+    }
+  }
+  throw new Error("The component could not be deleted.");
+}
+
 export async function updateCatalogComponentMetadata(
   config: GitHubConfig,
   component: CatalogComponent,
