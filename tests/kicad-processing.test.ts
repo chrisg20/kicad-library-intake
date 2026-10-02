@@ -105,10 +105,11 @@ const metadata: PartMetadata = {
   sourceUrl: "https://example.com/adl5606",
 };
 
-assert.equal(libraryCategories.length, 40);
-assert.equal(new Set(libraryCategories.map(({ id }) => id)).size, 40);
+assert.equal(libraryCategories.length, 41);
+assert.equal(new Set(libraryCategories.map(({ id }) => id)).size, 41);
 assert.ok(libraryCategories.every(({ id, label }) => id.startsWith("CG_") && !label.startsWith("CG_")));
 assert.equal(displayCategory("CG_RF_Filters_Passives"), "RF Filters & Passives");
+assert.equal(displayCategory("CG_Artwork"), "Artwork");
 assert.equal(sanitizeCatalogTitle("低噪声 Low-noise 発振器 oscillator"), "Low-noise oscillator");
 assert.equal(sanitizeCatalogTitle("低噪声発振器"), "");
 assert.equal(sanitizeManufacturerName("XDS (深圳芯达微电子)"), "XDS");
@@ -254,6 +255,24 @@ assert.match(decoder.decode(renamed.files.find((file) => file.kind === "footprin
 const noModel = await normalizeAssets([{ ...assets[1], id: "no-model" }], { ...metadata, category: "CG_Connectors" });
 assert.equal(noModel.modelLinks[0].status, "no-model");
 assert.doesNotMatch(decoder.decode(noModel.files.find((file) => file.kind === "footprint")!.bytes), /CG_KICAD_LIB/);
+
+// Artwork is valid as a footprint-only component.
+const artwork = await normalizeAssets([{ ...assets[1], id: "artwork-footprint" }], {
+  ...metadata,
+  manufacturer: "",
+  mpn: "Company_Logo",
+  libraryName: "Company_Logo",
+  title: "Company logo artwork",
+  packageName: "Silkscreen",
+  category: "CG_Artwork",
+  datasheet: "",
+  description: "Front silkscreen company logo",
+  sourceUrl: "",
+});
+assert.equal(artwork.symbolName, null);
+assert.equal(artwork.files.filter((file) => file.kind === "footprint").length, 1);
+assert.equal(artwork.files.some((file) => file.kind === "symbol"), false);
+assert.equal(artwork.files.some((file) => file.outputPath.startsWith("footprints/CG_Artwork.pretty/")), true);
 
 // 9. Reprocessing an already-correct footprint is idempotent and validates cleanly.
 const expectedRepoPath = "3dmodels/CG_Connectors.3dshapes/USB.step";
