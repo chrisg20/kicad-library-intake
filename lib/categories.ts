@@ -40,6 +40,7 @@ export const libraryCategories = [
   { id: "CG_Connectors", label: "Connectors" },
   { id: "CG_Switches_Relays_Circuit_Protection", label: "Switches, Relays & Circuit Protection" },
   { id: "CG_Artwork", label: "Artwork" },
+  { id: "CG_Mechanical_Components", label: "Mechanical Components" },
 ] as const;
 
 const categoryLabels = new Map<string, string>(

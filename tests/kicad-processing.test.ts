@@ -105,11 +105,12 @@ const metadata: PartMetadata = {
   sourceUrl: "https://example.com/adl5606",
 };
 
-assert.equal(libraryCategories.length, 41);
-assert.equal(new Set(libraryCategories.map(({ id }) => id)).size, 41);
+assert.equal(libraryCategories.length, 42);
+assert.equal(new Set(libraryCategories.map(({ id }) => id)).size, 42);
 assert.ok(libraryCategories.every(({ id, label }) => id.startsWith("CG_") && !label.startsWith("CG_")));
 assert.equal(displayCategory("CG_RF_Filters_Passives"), "RF Filters & Passives");
 assert.equal(displayCategory("CG_Artwork"), "Artwork");
+assert.equal(displayCategory("CG_Mechanical_Components"), "Mechanical Components");
 assert.equal(sanitizeCatalogTitle("低噪声 Low-noise 発振器 oscillator"), "Low-noise oscillator");
 assert.equal(sanitizeCatalogTitle("低噪声発振器"), "");
 assert.equal(sanitizeManufacturerName("XDS (深圳芯达微电子)"), "XDS");
@@ -273,6 +274,27 @@ assert.equal(artwork.symbolName, null);
 assert.equal(artwork.files.filter((file) => file.kind === "footprint").length, 1);
 assert.equal(artwork.files.some((file) => file.kind === "symbol"), false);
 assert.equal(artwork.files.some((file) => file.outputPath.startsWith("footprints/CG_Artwork.pretty/")), true);
+
+// Mechanical components can contain a footprint and 3D model without a symbol.
+const mechanical = await normalizeAssets([
+  { ...assets[1], id: "mechanical-footprint" },
+  { ...assets[2], id: "mechanical-model" },
+], {
+  ...metadata,
+  manufacturer: "Generic",
+  mpn: "M3_STANDOFF",
+  libraryName: "M3_Standoff",
+  title: "M3 threaded standoff",
+  packageName: "6mm",
+  category: "CG_Mechanical_Components",
+  datasheet: "",
+  description: "Board-mounted M3 threaded standoff",
+  sourceUrl: "",
+});
+assert.equal(mechanical.symbolName, null);
+assert.equal(mechanical.files.some((file) => file.kind === "symbol"), false);
+assert.equal(mechanical.files.some((file) => file.outputPath.startsWith("footprints/CG_Mechanical_Components.pretty/")), true);
+assert.equal(mechanical.files.some((file) => file.outputPath.startsWith("3dmodels/CG_Mechanical_Components.3dshapes/")), true);
 
 // 9. Reprocessing an already-correct footprint is idempotent and validates cleanly.
 const expectedRepoPath = "3dmodels/CG_Connectors.3dshapes/USB.step";
